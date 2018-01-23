@@ -75,7 +75,7 @@ v2d will run against a video file.  Since v2d uses ffmpeg, almost any video form
 $ v2d.py --input rtsp://example.com/yourstream
 ```
 
-v2d is well suited to capture and annotate webstream for security and automation.  
+v2d is well suited to capture and annotate a webstream for security and automation.  
 
 
 <img src='https://user-images.githubusercontent.com/478212/35298663-7f320a30-0048-11e8-8667-03f621dd6da1.png'>
