@@ -18,7 +18,7 @@ v2d converts a multimedia stream and output events to stdout.  Over time, the pr
 
 v2d mimics how the human brain works by first recognizing blocks of text in a scene.  It reads each block from largest to smallest, left to right, as fast as it can.  For more constrained environments, v2d will still spot the text but only translate if its been on the scene for a while. 
 
-<img src='https://user-images.githubusercontent.com/478212/35297123-b0e94412-0043-11e8-8dd6-3e5ab7399c71.png'>
+<img src='https://user-images.githubusercontent.com/478212/35303963-76733174-0059-11e8-9759-2f2644ddb71d.png'>
 
 ## Scene Understanding
 
