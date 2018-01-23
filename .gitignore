@@ -1,0 +1,8 @@
+*.old
+*.bak
+*.swp
+*.pyc
+*.new
+__pycache__
+
+
