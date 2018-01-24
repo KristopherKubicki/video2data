@@ -1,14 +1,12 @@
 # video2data
 
-<b>video2data</b> or <b>v2d</b> is a general purpose tool for describing images, video and audio.  The project aggregates multiple state-of-the-art neural networks in order to describe the contents of the video stream for machines or humans. 
+<b>video2data</b> or <b>v2d</b> is a general purpose tool for describing images, video and audio.  v2d aggregates multiple state-of-the-art neural networks in order to describe the contents of the video stream for machines or humans. 
 
 <img src='https://user-images.githubusercontent.com/478212/35297058-7ecca3e8-0043-11e8-884c-9466b08701b4.png'>
 
 The project started as a way to detect and recognize individuals in a security camera feed.  With recent breakthroughs in computer vision, machine learning and hardware acceleration, creating an end-to-end *understanding* of what's going in a video or image seems within reach.  v2d aims to integrate many of these technologies quickly for unconstrained environments. 
 
-The project relies heavily on Tensorflow and open-sourced neural network models.
-
-This repository is highly unstable and going through a prototype-to-mvp refactor.  
+This codebase relies heavily on Tensorflow and open-sourced neural network models.  The repository is highly unstable and going through a prototype-to-mvp refactor.  
 
 # Features
 
