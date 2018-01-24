@@ -2,9 +2,9 @@
 
 <b>video2data</b> or <b>v2d</b> is a general purpose tool for describing images, video and audio.  v2d aggregates multiple state-of-the-art neural networks to classify contents of the video stream for machines or humans. 
 
-<img src='https://user-images.githubusercontent.com/478212/35297058-7ecca3e8-0043-11e8-884c-9466b08701b4.png'>
+<a href='https://www.youtube.com/watch?v=Hq8-2D2iGok&feature=youtu.be'><img src='https://user-images.githubusercontent.com/478212/35297058-7ecca3e8-0043-11e8-884c-9466b08701b4.png'></a>
 
-The project started as a way to detect and recognize individuals in a security camera feed.  With recent breakthroughs in computer vision, machine learning and hardware acceleration, creating an end-to-end *understanding* of what's going in a video or image seems within reach.  v2d aims to integrate many of these technologies quickly for unconstrained environments. 
+The project started as a way to detect and recognize individuals in a security camera feed.  Recent breakthroughs software and hardware architecture bring *understanding* to media.  v2d aims to integrate many bleeding-edge technologies quickly for unconstrained environments. 
 
 This codebase relies heavily on Tensorflow and open-sourced neural network models.  The repository is highly unstable and going through a prototype-to-mvp refactor.  
 
@@ -93,6 +93,10 @@ There are breakthroughs every day in this space.  The newest models detect commo
 ## Natural Scene Recognition
 Some of the newest models can describe any image in exacting, deep detail.  We will see these soon.
 
+# High Level
+
+<img src='https://user-images.githubusercontent.com/478212/35318197-e3fce618-009f-11e8-8f96-9ee33241f8be.png'>
+
 # Contributing
 
 I am actively developing v2d and plan to incorporate many new features.  If you would like to participate in its development, please feel free to issue a PR or reach out!
@@ -110,5 +114,6 @@ Special thanks to all the people who inspired me to build this application.
   <li><a href='https://www.pyimagesearch.com/'>Adrian Rosebrock</a></li>
   <li><a href='http://blueprintalpha.com/'>Blueprint Alpha</a></li>
   <li><a href='https://soundcloud.com/hoodinternet'>The Hood Internet</a></li>
+  <li>#hassbro</li>
  </ul>
 
