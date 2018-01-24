@@ -56,9 +56,9 @@ import models.vehicles
 vehicles = models.vehicles.nnVehicles().load()
 vehicles.test(image_np_expanded)
 
-import models.object
-object = models.object.nnObject().load()
-#object.test(image_np_expanded)
+import models.objects
+objects = models.objects.nnObject().load()
+objects.test(image_np_expanded)
 
 
 #
@@ -146,27 +146,7 @@ logo_tracker = cv2.MultiTracker_create()
 face_tracker = cv2.MultiTracker_create()
 kitti_tracker = cv2.MultiTracker_create()
 
-
-# OCR class
-class OCRStream:
-
-  def load(self):
-    self.t = threading.Thread(target=self.update, args=())
-    self.t.daemon = True
-    self.t.start()
-    return self
-
-  def update(self):
-    sp = subprocess.Popen(['tesseract','stdin','stdout','--oem','3','--psm','13','-l','eng','/home/kristopher/tf_files/scripts/tess.config'], stdin=subprocess.PIPE,stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    text = sp.communicate(image)
-    sp.stdin.write(img)
-    sp.stdin.flush()
-    sp.stdin.close()
-    tmp_data = pipe[0].stdout.read()
-
-  def __init__(self):
-    self.input = Queue(maxsize=100)
-    self.output = Queue(maxsize=100)
+import detectors.ocr
 
 # 
 # Initialize casting buffer, so we can proxy out whaver feed came in
