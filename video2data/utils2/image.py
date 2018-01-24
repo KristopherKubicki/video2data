@@ -4,24 +4,6 @@
 import cv2
 import numpy as np
 
-# helper image for scene text detection
-def resize_image(im, max_side_len=2400):
-  h,w = im.shape[:2]
-  resize_w = w
-  resize_h = h
-  if max(resize_h, resize_w) > max_side_len:
-    ratio = float(max_side_len) / resize_h if resize_h > resize_w else float(max_side_len) / resize_w
-  else:
-    ratio = 1.
-  resize_h = int(resize_h * ratio)
-  resize_w = int(resize_w * ratio)
-  resize_h = resize_h if resize_h % 32 == 0 else (resize_h // 32 - 1) * 32
-  resize_w = resize_w if resize_w % 32 == 0 else (resize_w // 32 - 1) * 32
-  im = cv2.resize(im, (int(resize_w), int(resize_h)))
-  ratio_h = resize_h / float(h)
-  ratio_w = resize_w / float(w)
-  return im, (ratio_h, ratio_w)
-
 
 def zero_runs(a):
   iszero = np.concatenate(([0], np.equal(a, 0).view(np.int8), [0]))
@@ -68,47 +50,6 @@ def hullHorizontalImage(image, hull):
   M = cv2.getPerspectiveTransform(rect, dst)
   warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
   return warped
-
-#
-# Placeholder for eventual hashing algorithm
-#  Right now its lossless compression
-#
-def phash_bits(bitstring):
-  if bitstring is not '0b':
-    tmp = zlib.compress(bitstring.encode())
-    #tmp = int(bitstring, 2).to_bytes((len(bitstring) + 7) // 8, 'big')
-    # first 100 
-    return base64.urlsafe_b64encode(tmp).decode('utf-8')[:-2][:100]
-
-#
-# given a segment of audio, determine its energy
-#  check if that energy is in the human band of 
-#  speech.  
-#
-#  warning - this has a defect in it that will crash for long
-#  segments of audio.  Needs to be fixed
-#
-def speech_calc(self,raw_audio):
-  if len(raw_audio) < 10:
-    return
-  data_freq = np.fft.fftfreq(len(raw_audio),1.0/SAMPLE)
-  data_freq = data_freq[1:]
-  data_ampl = np.abs(np.fft.fft(raw_audio))
-  data_ampl = data_ampl[1:]
-  data_energy = data_ampl ** 2
-
-  energy_freq = {}
-  for (i, freq) in enumerate(data_freq):
-    if abs(freq) not in energy_freq:
-      energy_freq[abs(freq)] = data_energy[i] * 2
-
-  sum_energy = 0
-  for f in energy_freq.keys():
-    if 300<f<3000:
-      sum_energy += energy_freq[f]
-
-  # sometimes I get errors here
-  return sum_energy / sum(energy_freq.values())
 
 def rectInRect(rect1,rect2):
   return rect2[0] < rect1[0] < rect1[2] < rect2[2] and rect2[1] < rect1[1] < rect1[3] < rect2[3]

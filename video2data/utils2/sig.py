@@ -2,6 +2,9 @@
 # coding: utf-8
 #
 # Shot and scene printing
+
+import zlib
+import base64
 #
 #
 # Placeholder for eventual hashing algorithm

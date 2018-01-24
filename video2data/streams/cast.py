@@ -1,6 +1,12 @@
 #!/usr/bin/python3 
 # coding: utf-8
 
+# I had to manually patch this to make it work for python3
+#  there are better ways to do it
+# https://bugs.launchpad.net/python-v4l2/+bug/1664158
+import v4l2
+from fcntl import ioctl
+
 # 
 # Initialize casting buffer, so we can proxy out whaver feed came in
 #
@@ -14,34 +20,24 @@ class CastVideoStream:
     self.device = None
  
   def __del__(self):
-    if self.pipe is not None:
-      self.pipe.terminate()
-    if self.video_fifo is not None:
-      self.video_fifo.flush()
-      self.video_fifo.close()
-    if self.audio_fifo is not None:
-      self.audio_fifo.flush()
-      self.audio_fifo.close()
-    if os.path.exists('/tmp/%s_video' % self.name):
-      os.unlink('/tmp/%s_video' % self.name)
-    if os.path.exists('/tmp/%s_audio' % self.name):
-      os.unlink('/tmp/%s_audio' % self.name)
+    if self.device:
+      self.device.close()
 
-  def load(self):
+  def load(self,width,height):
 
     print("make sure you ran: modprobe v4l2loopback")
     self.device = open('/dev/video0', 'wb')
-    capability = v4l2_capability()
-    fmt = V4L2_PIX_FMT_YUYV
-    format = v4l2_format()
-    format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT
-    format.fmt.pix.pixelformat = V4L2_PIX_FMT_BGR24
-    format.fmt.pix.width = WIDTH
-    format.fmt.pix.height = HEIGHT
-    format.fmt.pix.field = V4L2_FIELD_NONE
-    format.fmt.pix.bytesperline = WIDTH * 3
-    format.fmt.pix.sizeimage = WIDTH * HEIGHT * 3
-    ioctl(self.device, VIDIOC_S_FMT, format)
+    capability = v4l2.v4l2_capability()
+    fmt = v4l2.V4L2_PIX_FMT_YUYV
+    format = v4l2.v4l2_format()
+    format.type = v4l2.V4L2_BUF_TYPE_VIDEO_OUTPUT
+    format.fmt.pix.pixelformat = v4l2.V4L2_PIX_FMT_BGR24
+    format.fmt.pix.width = width
+    format.fmt.pix.height = height
+    format.fmt.pix.field = v4l2.V4L2_FIELD_NONE
+    format.fmt.pix.bytesperline = width * 3
+    format.fmt.pix.sizeimage = width * height * 3
+    ioctl(self.device, v4l2.VIDIOC_S_FMT, format)
     return self
 
   def cast(self,buf):
