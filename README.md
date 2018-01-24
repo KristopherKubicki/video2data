@@ -16,7 +16,7 @@ v2d converts a multimedia stream and output events to stdout.  Over time, the pr
 
 ## Realtime Reading
 
-v2d mimics how the human brain works by first recognizing blocks of text in a scene.  It reads each block from largest to smallest, left to right, as fast as it can.  For more constrained environments, v2d will still spot the text but only translate if its been on the scene for a while. 
+v2d mimics how the human brain works by first recognizing blocks of text in a scene.  It reads each block from largest to smallest, left to right, as fast as it can.  For more constrained environments, v2d will still spot the text but only translate if it can keep up with the signal. 
 
 <img src='https://user-images.githubusercontent.com/478212/35303963-76733174-0059-11e8-9759-2f2644ddb71d.png'>
 
@@ -67,7 +67,7 @@ Runs v2d against an image, taking extra time to enhance the image, recognizing o
 $ v2d.py --input videofile.mpg
 ```
 
-v2d will run against a video file.  Since v2d uses ffmpeg, almost any video format is natively supported.  This is useful for creating descriptions of video for archiving and easy recall. In addition, v2d is fingerprinting all shots and scenes it detects by default
+v2d will run against a video file.  Since v2d uses ffmpeg, almost any video format is natively supported.  This is useful for creating descriptions of video for archiving and easy recall. In addition, v2d is fingerprinting all shots and scenes it detects by default.
 
 <img src='https://user-images.githubusercontent.com/478212/35298409-bb758734-0047-11e8-9f8b-8a1fd7205cc7.png'>
 
@@ -92,12 +92,12 @@ Much of the v2d development was done on live streaming HDHomerun MPEG-TS endpoin
 
 ## Deep Audio Recognition
 There are breakthroughs every day in this space.  The newest models detect common sounds very well: music, glass breaking, gunshots, humans.  Speech to Text is coming in a big way too.
-## Very Advanced Scene Recognition
+## Natural Scene Recognition
 Some of the newest models can describe any image in exacting, deep detail.  We will see these soon.
 
 # Contributing
 
-I am actively developing v2d and plan to incorporate many advanced features.  If you would like to participate in its development, please feel free to issue a PR or reach out!
+I am actively developing v2d and plan to incorporate many new features.  If you would like to participate in its development, please feel free to issue a PR or reach out!
 
 # Thanks
 
@@ -110,5 +110,7 @@ Special thanks to all the people who inspired me to build this application.
   <li><a href='https://github.com/tensorflow/models/tree/master/research/attention_ocr'>Attention OCR</a></a>
   <li><a href='https://github.com/davisking/dlib'>dlib</a></a></li>
   <li><a href='https://www.pyimagesearch.com/'>Adrian Rosebrock</a></li>
+  <li><a href='http://blueprintalpha.com/'>Blueprint Alpha</a></li>
+  <li><a href='https://soundcloud.com/hoodinternet'>The Hood Internet</a></li>
  </ul>
 
