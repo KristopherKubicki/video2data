@@ -1,4 +1,4 @@
-#!/usr/bin/python3 
+#!/usr/bin/python3
 # coding: utf-8
 #
 # This is a general framework to fuse a lot of neural network based technologies together.
@@ -37,19 +37,29 @@
 # I want to look through AR goggles and have unblink filter all the ads for me
 #   Right now it has a 0-20s delay.  
 #
-# Originally I used a basic Thread to power the event loop.  It has a way to call a deque, which I used for the audio.
-#  when I swithced to multiprocessing, I couldn't peek ahead on the queue, and thus couldnt do audio.  The application
-# needs multiprocessing badly!
-#import threading
-import multiprocessing 
-
-
 import os, sys, math
-
 import tensorflow as tf
 
-if __name__ == '__main__':
-  multiprocessing.set_start_method('spawn')
+from utils2 import image as v2dimage
+
+import cv2
+import numpy as np
+
+image_np = cv2.imread("/home/kristopher/tf_files/scripts/test.jpg")
+image_np_expanded = np.expand_dims(image_np, axis=0)
+# now load up the fastest model. Average inference is about 0.03s at 1080p
+import models.ssd
+ssd = models.ssd.nnSSD().load()
+ssd.test(image_np_expanded)
+
+import models.vehicles
+vehicles = models.vehicles.nnVehicles().load()
+vehicles.test(image_np_expanded)
+
+import models.object
+object = models.object.nnObject().load()
+#object.test(image_np_expanded)
+
 
 #
 # Consider disabling OpenCL! I've had some weirdness with it
@@ -65,13 +75,12 @@ SAMPLE = 44100
 
 # get ready, you're going to use a lot of this
 import numpy as np
-from PIL import Image
 
 # and playing with fifo buffers
 from fcntl import fcntl, F_GETFL, F_SETFL, ioctl 
 
-import os, sys, math, select
-from os import O_RDONLY, O_NONBLOCK, read
+import os, sys, math
+from os import O_NONBLOCK, read
 import copy
 import random
 
@@ -91,8 +100,12 @@ import zlib
 
 # 3.4.0
 import cv2
-cv2.ocl.setUseOpenCL(cv2.ocl.haveOpenCL())
-#cv2.ocl.setUseOpenCL(False)
+
+# Originally I used a basic Thread to power the event loop.  It has a way to call a deque, which I used for the audio.
+#  when I swithced to multiprocessing, I couldn't peek ahead on the queue, and thus couldnt do audio.  The application
+# needs multiprocessing badly!
+import threading
+import multiprocessing
 
 # A few subprocesses open pipes into the 
 import subprocess
@@ -102,8 +115,7 @@ from queue import Queue
 # encode 128D vectors for facial fingerprints
 import base64
 
-#import pytesseract
-#import tesserocr
+import titlecase
 
 # I want to set a dict with a key value without initializing the key
 from collections import defaultdict
@@ -134,81 +146,27 @@ logo_tracker = cv2.MultiTracker_create()
 face_tracker = cv2.MultiTracker_create()
 kitti_tracker = cv2.MultiTracker_create()
 
-image_np = cv2.imread("test.jpg")
-#cv2.imshow('Object Detection',image_np)
-#cv2.waitKey(1000)
-image_np_expanded = np.expand_dims(image_np, axis=0)
-
-
-
-# helper image for scene text detection
-def resize_image(im, max_side_len=2400):
-  h,w = im.shape[:2]
-  resize_w = w
-  resize_h = h
-  if max(resize_h, resize_w) > max_side_len:
-    ratio = float(max_side_len) / resize_h if resize_h > resize_w else float(max_side_len) / resize_w
-  else:
-    ratio = 1.
-  resize_h = int(resize_h * ratio)
-  resize_w = int(resize_w * ratio)
-  resize_h = resize_h if resize_h % 32 == 0 else (resize_h // 32 - 1) * 32
-  resize_w = resize_w if resize_w % 32 == 0 else (resize_w // 32 - 1) * 32
-  im = cv2.resize(im, (int(resize_w), int(resize_h)))
-  ratio_h = resize_h / float(h)
-  ratio_w = resize_w / float(w)
-  return im, (ratio_h, ratio_w)
 
 # OCR class
 class OCRStream:
 
   def load(self):
-    #self.t = threading.Thread(target=self.update, args=())
-    #multiprocessing.set_start_method('spawn')
-    self.t = multiprocessing.Process(target=self.update, args=())
+    self.t = threading.Thread(target=self.update, args=())
     self.t.daemon = True
     self.t.start()
     return self
 
   def update(self):
-
-    while True:
-      if self.input.qsize() == 0:
-        time.sleep(0.01)
-        continue
-
-      # have to attach scene ID to each of these to make sure its needed
-      text_id, image,text,highest_score = self.input.get()
-      h,w,_ = image.shape
-      cv2.imwrite('/tmp/ocr.bmp',image)
-      ret,image = cv2.imencode(".bmp",image)
-      #tesseract 4.00.00alpha
-      # leptonica-1.74.4
-      #   libjpeg 8d (libjpeg-turbo 1.5.2) : libpng 1.6.34 : libtiff 4.0.8 : zlib 1.2.11
-      sp = subprocess.Popen(['tesseract','stdin','stdout','--oem','3','--psm','13','-l','eng','/home/kristopher/tf_files/scripts/tess.config'], stdin=subprocess.PIPE,stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-      #flags = fcntl(sp.stdout, F_GETFL)
-      #fcntl(sp.stdout, F_SETFL, flags | O_NONBLOCK)
-      tmp_data,err = sp.communicate(image.tostring())
-      #tmp_data = ''
-      sp.terminate()
-      for line in tmp_data.decode('utf-8').split('\n'):
-        cols = line.split('\t')
-      #  #if len(cols) > 10 and cols[10].isdigit() and int(cols[10]) > highest_score and int(cols[8]) > w * 0.8:
-        if len(cols) > 10 and cols[10].isdigit() and int(cols[10]) > int(highest_score):
-      #     print('\t\tcols',cols[10],cols[11],text,highest_score)
-           highest_score = int(cols[10])
-           text = cols[11]
-      
-      self.output.put([text_id,text,highest_score])
-      time.sleep(0.01)
+    sp = subprocess.Popen(['tesseract','stdin','stdout','--oem','3','--psm','13','-l','eng','/home/kristopher/tf_files/scripts/tess.config'], stdin=subprocess.PIPE,stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    text = sp.communicate(image)
+    sp.stdin.write(img)
+    sp.stdin.flush()
+    sp.stdin.close()
+    tmp_data = pipe[0].stdout.read()
 
   def __init__(self):
-    self.input = multiprocessing.Queue(maxsize=1024)
-    self.output = multiprocessing.Queue(maxsize=1024)
-
-  def __del__(self):
-    if self.t:
-      self.t.terminate()
+    self.input = Queue(maxsize=100)
+    self.output = Queue(maxsize=100)
 
 # 
 # Initialize casting buffer, so we can proxy out whaver feed came in
@@ -264,35 +222,24 @@ print('Step 5 writing test image')
 # TODO: freeze model
 sys.path.append('/home/kristopher/EAST')
 import model as east
+
+# this is a custom module that needs to be refactored over here
 import loadeast
+
 input_images = tf.placeholder(tf.float32, shape=[None, None, None, 3], name='input_images')
 f_score, f_geometry = east.model(input_images, is_training=False)
 ocr_sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
 global_step = tf.get_variable('global_step', [], initializer=tf.constant_initializer(0), trainable=False)
 variable_averages = tf.train.ExponentialMovingAverage(0.997, global_step)
 saver = tf.train.Saver(variable_averages.variables_to_restore())
-saver.restore(ocr_sess, '/home/kristopher/EAST/east_icdar2015_resnet_v1_50_rbox/model.ckpt-49491')
-
-#image_np = cv2.imread('/home/kristopher/Downloads/picture3.jpeg')
-#im_resized, (ratio_h,ratio_w) = resize_image(image_np)
-#timer = {'net': 0, 'restore': 0, 'nms': 0}
-#start = time.time()
-#scores, geometry = ocr_sess.run([f_score, f_geometry], feed_dict={input_images: [im_resized]})
-#timer['net'] = time.time() - start
-#boxes, timer = loadeast.detect(score_map=scores, geo_map=geometry,timer=timer)
-
-#if boxes is not None:
-#  boxes = boxes[:, :8].reshape((-1, 4, 2))
-#  boxes[:, :, 0] /= ratio_w
-#  boxes[:, :, 1] /= ratio_h
-#  print('boxes',boxes,ratio_w,ratio_h)
-#  for box in boxes:
-#    cv2.polylines(image_np, [box.astype(np.int32).reshape((-1,1,2))], True, color=(255, 255, 0), thickness=1)
+saver.restore(ocr_sess, 'models/text/model.east_icdar2015_resnet_v1_50_rbox.ckpt-49491')
 
 
 
 # load up the im2txt captioner.  This is used to describe shots
 #  mine is trained against mscoco.  This will be a rapidly advancing area
+#
+# consider just importing this whole thing 
 sys.path.append('/home/kristopher/models/research/im2txt')
 from im2txt import configuration
 from im2txt import inference_wrapper
@@ -302,14 +249,15 @@ imcap_graph = tf.Graph()
 with imcap_graph.as_default():
   model = inference_wrapper.InferenceWrapper()
   restore_fn = model.build_graph_from_config(configuration.ModelConfig(),
-          '/home/kristopher/models/research/im2txt/im2txt/model/train/')
+          'models/im2txt/')
 imcap_graph.finalize()
 # TODO: this graph could benefit from being frozen.  Compression + speed enhancements
-vocab = vocabulary.Vocabulary('/home/kristopher/models/research/im2txt/im2txt/data/word_counts.txt')
+vocab = vocabulary.Vocabulary('models/im2txt/word_counts.txt')
 imcap_sess = tf.Session(graph=imcap_graph)
 restore_fn(imcap_sess)
 generator = caption_generator.CaptionGenerator(model, vocab,4,17,1.5)
 #image_enc = cv2.imencode('.jpg', image_np)[1].tostring()
+# I heavily modified the beam search and need to get that ported into this release
 #captions = generator.beam_search(imcap_sess, image_enc)
 #print("Captions for test image:")
 #for i, caption in enumerate(captions):
@@ -317,176 +265,47 @@ generator = caption_generator.CaptionGenerator(model, vocab,4,17,1.5)
 #  sentence = " ".join(sentence)
 #  print("  %d) %s (p=%f)" % (i, sentence, math.exp(caption.logprob)))
 
-
-#input_images = tf.placeholder(tf.float32, shape=[None, None, None, 3], name='input_images')
-#global_step = tf.get_variable('global_step', [], initializer=tf.constant_initializer(0), trainable=False)
-#f_score, f_geometry = eastmodel.model(input_images, is_training=False)
-#variable_averages = tf.train.ExponentialMovingAverage(0.997, global_step)
-#saver = tf.train.Saver(variable_averages.variables_to_restore())
-#sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
-#checkpoint_path = '/home/kristopher/EAST/east_icdar2015_resnet_v1_50_rbox/model.ckpt-49491'
-#ckpt_state = tf.train.get_checkpoint_state(checkpoint_path)
-#model_path = os.path.join(checkpoint_path, os.path.basename(ckpt_state.model_checkpoint_path))
-#saver.restore(sess, checkpoint_path)
-
-# attention ocr
-#ocr_graph = tf.Graph()
-# TODO: this graph could benefit from being frozen
-#model.ckpt-399731
-#endpoints = model.create_base(images_placeholder, labels_one_hot=None)
-#with ocr_graph.as_default():
-#  model = inference_wrapper.InferenceWrapper()
-#  restore_fn = model.build_graph_from_config(configuration.ModelConfig(),
-#          '/home/kristopher/models/research/attention_ocr/python/')
-#ocr_graph.finalize()
-#restore_fn(ocr_sess)
-#ocr_image_tensor = ocr_graph.get_tensor_by_name('image_tensor:0')
-#ocr_predictions = ocr_graph.get_tensor_by_name('image_tensor:0')
-
 # load up the SSD-derived NN I trained on the 16 brand logos
 #   this is used for commercial detection.  Average inference is about 0.03s on 1080p
-MODEL_NAME = 'da1_12_20_2017'
-PATH_TO_CKPT = '/home/kristopher/tf_files/models/' + MODEL_NAME + '/frozen_inference_graph.pb'
-logo_graph = tf.Graph()
-with logo_graph.as_default():
-  od_graph_def = tf.GraphDef()
-  with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
-    serialized_graph = fid.read()
-    od_graph_def.ParseFromString(serialized_graph)
-    tf.import_graph_def(od_graph_def, name='')
-NUM_CLASSES = 16
-label_map = label_map_util.load_labelmap('/home/kristopher/tf_files/tmp/deepad.pbtxt')
-categories = label_map_util.convert_label_map_to_categories(label_map, max_num_classes=NUM_CLASSES, use_display_name=True)
-category_index = label_map_util.create_category_index(categories)
-
-# create all the object detection return value structures
-da_image_tensor = logo_graph.get_tensor_by_name('image_tensor:0')
-da_detection_boxes = logo_graph.get_tensor_by_name('detection_boxes:0')
-da_detection_scores = logo_graph.get_tensor_by_name('detection_scores:0')
-da_detection_classes = logo_graph.get_tensor_by_name('detection_classes:0')
-da_num_detections = logo_graph.get_tensor_by_name('num_detections:0')
-
-# now load up the fastest model. Average inference is about 0.03s at 1080p
-print("loading mobilenet")
-MODEL_NAME = 'ssd_mobilenet_v1_coco_11_06_2017'
-#  Mobilenet is a lot faster!
-#MODEL_NAME = 'ssd_inception_v2_coco_2017_11_17'
-PATH_TO_CKPT = '/home/kristopher/tf_files/models/' + MODEL_NAME + '/frozen_inference_graph.pb'
-coco_graph = tf.Graph()
-with coco_graph.as_default():
-  od_graph_def = tf.GraphDef()
-  with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
-    serialized_graph = fid.read()
-    od_graph_def.ParseFromString(serialized_graph)
-    tf.import_graph_def(od_graph_def, name='coco')
-NUM_CLASSES = 90
-clabel_map = label_map_util.load_labelmap('/home/kristopher/tf_files/models/' + MODEL_NAME + '/mscoco_label_map.pbtxt')
-ccategories = label_map_util.convert_label_map_to_categories(clabel_map, max_num_classes=NUM_CLASSES, use_display_name=True)
-ccategory_index = label_map_util.create_category_index(ccategories)
-
-c_image_tensor = coco_graph.get_tensor_by_name('coco/image_tensor:0')
-c_detection_boxes = coco_graph.get_tensor_by_name('coco/detection_boxes:0')
-c_detection_scores = coco_graph.get_tensor_by_name('coco/detection_scores:0')
-c_detection_classes = coco_graph.get_tensor_by_name('coco/detection_classes:0')
-c_num_detections = coco_graph.get_tensor_by_name('coco/num_detections:0')
-
-#
-# Another model that can detect tons of objects. This is currently
-# the biggest public model that I know about,  Open Images.  It has 546 objects
-#  It takes 0.7s per detection.  12s to load
-# 
-print("loading open images, this takes a while")
-# http://download.tensorflow.org/models/object_detection/faster_rcnn_inception_resnet_v2_atrous_lowproposals_oid_2017_11_08.tar.gz
-#MODEL_NAME = 'faster_rcnn_inception_resnet_v2_atrous_lowproposals_oid_2017_11_08'
-# the low proposals set is supposed to be twice as fast as the normal one.  i have found that not be the case
-# and they run about the same.  
-MODEL_NAME = 'faster_rcnn_inception_resnet_v2_atrous_oid_2017_11_08'
-PATH_TO_CKPT = '/home/kristopher/tf_files/models/' + MODEL_NAME + '/frozen_inference_graph.pb'
-oi_sess = None
-if False:
-  oi_graph = tf.Graph()
-  with oi_graph.as_default():
+logo_sess = None
+if os.path.exists('models/contrib/deepad/frozen_inference_graph.pb'):
+  logo_graph = tf.Graph()
+  with logo_graph.as_default():
     od_graph_def = tf.GraphDef()
-    with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
+    with tf.gfile.GFile('models/contrib/deepad/frozen_inference_graph.pb', 'rb') as fid:
       serialized_graph = fid.read()
       od_graph_def.ParseFromString(serialized_graph)
-      tf.import_graph_def(od_graph_def, name='oi')
+      tf.import_graph_def(od_graph_def, name='')
+  NUM_CLASSES = 16
+  label_map = label_map_util.load_labelmap('models/contrib/deepad/deepad.pbtxt')
+  categories = label_map_util.convert_label_map_to_categories(label_map, max_num_classes=NUM_CLASSES, use_display_name=True)
+  category_index = label_map_util.create_category_index(categories)
 
-  # this is the coco set now
-  NUM_CLASSES = 546
-  olabel_map = label_map_util.load_labelmap('/home/kristopher/tf_files/models/' + MODEL_NAME + '/oid_bbox_trainable_label_map.pbtxt')
-  ocategories = label_map_util.convert_label_map_to_categories(olabel_map, max_num_classes=NUM_CLASSES, use_display_name=True)
-  ocategory_index = label_map_util.create_category_index(ocategories)
+# create all the object detection return value structures
+  da_image_tensor = logo_graph.get_tensor_by_name('image_tensor:0')
+  da_detection_boxes = logo_graph.get_tensor_by_name('detection_boxes:0')
+  da_detection_scores = logo_graph.get_tensor_by_name('detection_scores:0')
+  da_detection_classes = logo_graph.get_tensor_by_name('detection_classes:0')
+  da_num_detections = logo_graph.get_tensor_by_name('num_detections:0')
+  logo_sess = tf.Session(graph=logo_graph)
+  (boxes, scores, classes, num) = logo_sess.run(
+    [da_detection_boxes, da_detection_scores, da_detection_classes, da_num_detections],
+    feed_dict={da_image_tensor: image_np_expanded})
 
-  oi_image_tensor = oi_graph.get_tensor_by_name('oi/image_tensor:0')
-  oi_detection_boxes = oi_graph.get_tensor_by_name('oi/detection_boxes:0')
-  oi_detection_scores = oi_graph.get_tensor_by_name('oi/detection_scores:0')
-  oi_detection_classes = oi_graph.get_tensor_by_name('oi/detection_classes:0')
-  oi_num_detections = oi_graph.get_tensor_by_name('oi/num_detections:0')
-  oi_sess = tf.Session(graph=oi_graph)
 
-  (oboxes, oscores, oclasses, onum) = oi_sess.run(
-    [oi_detection_boxes, oi_detection_scores, oi_detection_classes, oi_num_detections],
-    feed_dict={oi_image_tensor: image_np_expanded})
-
-#
-# A car / pedestrian favored model, good for exterior cameras
-#  It takes 0.04s for 1080p
-#  
-print("loading KITTI (car, people)")
-MODEL_NAME = 'faster_rcnn_resnet101_kitti_2017_11_08'
-# http://download.tensorflow.org/models/object_detection/faster_rcnn_resnet101_kitti_2017_11_08.tar.gz
-PATH_TO_CKPT = '/home/kristopher/tf_files/models/' + MODEL_NAME + '/frozen_inference_graph.pb'
-kitti_graph = tf.Graph()
-with kitti_graph.as_default():
-  kitti_graph_def = tf.GraphDef()
-  with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
-    serialized_graph = fid.read()
-    od_graph_def.ParseFromString(serialized_graph)
-    tf.import_graph_def(od_graph_def, name='kitti')
-
-# this is the coco set now
-NUM_CLASSES = 2
-klabel_map = label_map_util.load_labelmap('/home/kristopher/tf_files/models/' + MODEL_NAME + '/kitti_label_map.pbtxt')
-kcategories = label_map_util.convert_label_map_to_categories(klabel_map, max_num_classes=NUM_CLASSES, use_display_name=True)
-kcategory_index = label_map_util.create_category_index(kcategories)
-
-kitti_image_tensor = kitti_graph.get_tensor_by_name('kitti/image_tensor:0')
-kitti_detection_boxes = kitti_graph.get_tensor_by_name('kitti/detection_boxes:0')
-kitti_detection_scores = kitti_graph.get_tensor_by_name('kitti/detection_scores:0')
-kitti_detection_classes = kitti_graph.get_tensor_by_name('kitti/detection_classes:0')
-kitti_num_detections = kitti_graph.get_tensor_by_name('kitti/num_detections:0')
 
 #
 # I need to run a calibrator for all of the NNs.  They take a long time to run
 #  the first time.  So it's important to run them once before doing everything else
 #
-logo_sess = tf.Session(graph=logo_graph)
-coco_sess = tf.Session(graph=coco_graph)
-kitti_sess = tf.Session(graph=kitti_graph)
 
-# load a test image
+all_stuff = []
+for item in ssd.ccategory_index:
+  all_stuff.append(ssd.ccategory_index[item]['name'])
+
 start = time.time()
-(cboxes, cscores, cclasses, cnum) = coco_sess.run(
-  [c_detection_boxes, c_detection_scores, c_detection_classes, c_num_detections],
-  feed_dict={c_image_tensor: image_np_expanded})
-print("init coco_done",time.time() - start)
-(boxes, scores, classes, num) = logo_sess.run(
-  [da_detection_boxes, da_detection_scores, da_detection_classes, da_num_detections],
-  feed_dict={da_image_tensor: image_np_expanded})
-print("init logo_done",time.time() - start)
-(kboxes, kscores, kclasses, knum) = kitti_sess.run(
-  [kitti_detection_boxes, kitti_detection_scores, kitti_detection_classes, kitti_num_detections],
-  feed_dict={kitti_image_tensor: image_np_expanded})
-print("init kitti_done",time.time() - start)
-
-#
-# I want to add a scene text detection TF model (probably EAST)
-#
-
 # Load up the sources 
 sources = [line.rstrip('\n') for line in open('/home/kristopher/tf_files/scripts/sources.txt')]
-
  
 # 
 # Initialize transcription buffer
@@ -538,8 +357,8 @@ def hullHorizontalImage(image, hull):
   (tl, tr, br, bl) = np.int0(rect)
   
   # if these 2 are close, don't skew it.  It's horizontal
-  # 5% seems about right
-  if (tr[1] - bl[1]) / image.shape[0] < 0.05:
+  # 2% seems about right
+  if (tr[1] - bl[1]) / image.shape[0] < 0.02:
     return image[tr[1]:bl[1],bl[0]:tr[0]:]
 
   widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
@@ -683,22 +502,18 @@ class FileVideoStream:
       self.stream = str.replace(self.stream,'@','\\\@')
  
       # we should probably always stick to 're' for most video
-      video_command = [ 'ffmpeg','-nostdin','-re','-hide_banner','-loglevel','info','-hwaccel','vdpau','-y','-f', 'lavfi','-i','movie=%s:s=0\\\:v+1\\\:a[out0+subcc][out1]' % self.stream,'-map','0:v','-vf','scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2' % (WIDTH,HEIGHT,WIDTH,HEIGHT),'-pix_fmt','bgr24','-r','%f' % FPS,'-s','%dx%d' % (WIDTH,HEIGHT),'-vcodec','rawvideo','-f','rawvideo','/tmp/%s_video' % self.name, '-map','0:a','-acodec','pcm_s16le','-r','%f' % FPS,'-ab','16k','-ar','%d' % SAMPLE,'-ac','1','-f','wav','/tmp/%s_audio' % self.name, '-map','0:s','-f','srt','/tmp/%s_caption' % self.name  ] 
+      video_command = [ 'ffmpeg','-nostdin','-re','-hide_banner','-loglevel','panic','-hwaccel','vdpau','-y','-f', 'lavfi','-i','movie=%s:s=0\\\:v+1\\\:a[out0+subcc][out1]' % self.stream,'-map','0:v','-vf','scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2' % (WIDTH,HEIGHT,WIDTH,HEIGHT),'-pix_fmt','bgr24','-r','%f' % FPS,'-s','%dx%d' % (WIDTH,HEIGHT),'-vcodec','rawvideo','-f','rawvideo','/tmp/%s_video' % self.name, '-map','0:a','-acodec','pcm_s16le','-r','%f' % FPS,'-ab','16k','-ar','%d' % SAMPLE,'-ac','1','-f','wav','/tmp/%s_audio' % self.name, '-map','0:s','-f','srt','/tmp/%s_caption' % self.name  ] 
       self.pipe = subprocess.Popen(video_command)
 
       print('Step 2 initializing video /tmp/%s_video' % self.name)
-      if not os.path.exists('/tmp/%s_video' % self.name):
-        return
-      #self.video_fifo = open('/tmp/%s_video' % self.name,'rb',WIDTH*HEIGHT*3*10)
-      self.video_fifo = os.open('/tmp/%s_video' % self.name,os.O_RDONLY | os.O_NONBLOCK)
+      self.video_fifo = open('/tmp/%s_video' % self.name,'rb',WIDTH*HEIGHT*3*10)
       #fcntl(self.video_fifo,1031,6220800)
-      fcntl(self.video_fifo,1031,1048576)
-      #flags = fcntl(self.video_fifo, F_GETFL)
-      #fcntl(self.video_fifo, F_SETFL, flags | O_NONBLOCK)
+      #fcntl(self.video_fifo,1031,1048576)
+      flags = fcntl(self.video_fifo, F_GETFL)
+      fcntl(self.video_fifo, F_SETFL, flags | O_NONBLOCK)
 
       print('Step 3 initializing video /tmp/%s_video' % self.name)
-      #self.audio_fifo = open('/tmp/%s_audio' % self.name,'rb',SAMPLE*10)
-      self.audio_fifo = os.open('/tmp/%s_audio' % self.name,os.O_RDONLY | os.O_NONBLOCK,SAMPLE*10)
+      self.audio_fifo = open('/tmp/%s_audio' % self.name,'rb',SAMPLE*10)
       fcntl(self.audio_fifo,1031,1048576)
       # buffer size has been an issue before too
       #fcntl(self.audio_fifo,1031,6220800)
@@ -725,13 +540,6 @@ class FileVideoStream:
     else:
       print("unrecognized input")
       return
- 
-    self.audio_poll = select.poll()
-    self.video_poll = select.poll()
-    self.audio_poll.register(self.audio_fifo,select.POLLIN)
-    self.video_poll.register(self.video_fifo,select.POLLIN)
-
-    time.sleep(5)
     print('pid:',self.pipe.pid)
 
 #
@@ -758,16 +566,20 @@ class FileVideoStream:
     self.filepos = 0
     self.clockbase = 0
     self.microclockbase = 0
-    self.stopped = multiprocessing.Value('i',False)
+    self.stopped = False
     self.ff = False
 
     # disabled for now. 
     self.tas = None
     #self.tas = TranscribeAudioStream().load()
-    self.ocr = OCRStream().load()
+
 
     # initialize the analyzer pipe
-    self.Q = multiprocessing.Queue(maxsize=queueSize)
+    self.Q = Queue(maxsize=queueSize)
+
+    print("process!")
+    self.process()
+
 
   def __del__(self):
     # I need to figure out how to get it to reset the console too
@@ -777,8 +589,6 @@ class FileVideoStream:
       os.unlink('/tmp/%s_audio' % self.name)
     if os.path.exists('/tmp/%s_caption' % self.name):
       os.unlink('/tmp/%s_caption' % self.name)
-    if self.t:
-      self.t.terminate()
     if self.video_fifo:
       self.video_fifo.flush()
       self.video_fifo.close()
@@ -798,9 +608,9 @@ class FileVideoStream:
 
 # Thread here
   def load(self):
-    #self.t = threading.Thread(target=self.update, args=())
-    self.t = multiprocessing.Process(target=self.update, args=())
-    #self.t.daemon = True
+    self.t = threading.Thread(target=self.update, args=())
+    #self.t = multiprocess.Process(target=self.update, args=())
+    self.t.daemon = True
     self.t.start()
     return self
 
@@ -808,8 +618,6 @@ class FileVideoStream:
 #  a queue.  the captions go into neverending hash (never gets pruned)
 #  audio goes into a neverending place in memory
   def update(self):
-     print("process!")
-     self.process()
      timeout = 0
      read_frame = 0
 
@@ -820,13 +628,12 @@ class FileVideoStream:
      raw_audio = bytes()
      raw_image = bytes()
 
+     print("start thread",threading.current_thread);
 
-     print('reading1...',self.stopped.value,self.t.pid,self.Q.qsize(),self.t.is_alive())
-     while self.stopped.value == 0 and self.t.is_alive():
-       print('reading2...',self.stopped.value,self.t.pid,self.Q.qsize(),self.t.is_alive())
+     while self.stopped is False:
        if self.Q.qsize() >= 1024:
          time.sleep(0.1)
-         print('timing out...')
+       # print('timing out...')
 
        if self.Q.qsize() < 1024:
          rstart = time.time()
@@ -842,13 +649,10 @@ class FileVideoStream:
 
 ###### audio
 #  audio is read in, a little bit at a time
-         #if self.audio_fifo and self.pipe.poll() is None and self.audio_poll.poll() is None:
-         if self.audio_fifo and self.audio_poll is not None and len(self.audio_poll.poll(1)) > 0:
-           print('reading audio1',int(2*SAMPLE/FPS),self.audio_poll.poll(1))
-           #raw_audio = self.audio_fifo.read(int(2*SAMPLE / FPS))
-
-           raw_audio = os.read(self.audio_fifo,int(2*SAMPLE / FPS))
-           print('reading audio2')
+         if self.audio_fifo:
+           #print('reading audio1',int(2*SAMPLE/FPS))
+           raw_audio = self.audio_fifo.read(int(2*SAMPLE / FPS))
+           #print('reading audio2')
            #if raw_audio is None:
            #  print('warning audio frame empty')
            if raw_audio is not None:
@@ -891,27 +695,28 @@ class FileVideoStream:
 
 ###### video
          if self.image:
-           data['raw'] = cv2.resize(cv2.imread(self.stream),(WIDTH,HEIGHT))
-         #elif self.video_fifo and self.pipe.poll() is None and self.video_poll.poll() is None:
-         elif self.video_fifo and self.video_poll is not None and len(self.video_poll.poll(1)) > 0:
+           blank_image = np.zeros((HEIGHT,WIDTH,3),np.uint8)
+           raw = cv2.imread(self.stream)
+           max_y = HEIGHT
+           max_width = WIDTH
+           if raw.shape[1] > WIDTH:
+             raw = raw[0:raw.shape[0],0:WIDTH]
+           if raw.shape[0] > HEIGHT:
+             raw = raw[0:HEIGHT,0:raw.shape[1]]
+           blank_image[0:raw.shape[0], 0:raw.shape[1]] = raw
+           data['raw'] = blank_image
+         elif self.video_fifo and self.pipe.poll() is None:
            fail = 0
-           bufsize = WIDTH*HEIGHT*3 - len(raw_image)
+           bufsize = WIDTH*HEIGHT*3
 
            #print('reading video1')
            while bufsize > 0:
-             if data.get('audio'):
-               print('reading video1a',bufsize,'/tmp/%s_video' % self.name,len(data.get('audio')),self.video_poll.poll(1))
-             else:
-               print('reading video1a',bufsize,'/tmp/%s_video' % self.name,0,self.video_poll.poll(1))
-
-             #tmp = self.video_fifo.read(bufsize)
-             tmp = os.read(self.video_fifo,bufsize)
-             print('reading video1b')
+             #print('reading video1a',bufsize)
+             tmp = self.video_fifo.read(bufsize)
+             #print('reading video1b')
              if tmp is not None:
                raw_image += tmp
                bufsize = WIDTH*HEIGHT*3 - len(raw_image)
-               if bufsize < 0:
-                 print('warning, negative buf',bufsize)
              else:
                fail += 1
                time.sleep(0.01)
@@ -921,24 +726,14 @@ class FileVideoStream:
            if raw_image is not None and len(raw_image) == WIDTH*HEIGHT*3:
              data['raw'] = np.fromstring(raw_image,dtype='uint8').reshape((HEIGHT,WIDTH,3))
 
-         print('reading2a...',self.stopped.value,self.t.pid,self.Q.qsize(),self.t.is_alive(),self.pipe.poll())
          if data is not None and data.get('raw') is not None:
-           print('reading2a1')
            raw_image = bytes()
-           print('reading2a1a1',len(data['raw']),read_frame)
-           cv2.imwrite('/tmp/tmp.bmp',data['raw'])
-           cv2.imshow('buf',data['raw'])
-           cv2.waitKey(100)
            data['bw'] = cv2.cvtColor(data['raw'], cv2.COLOR_BGR2GRAY)
-           print('reading2a1a2')
            non_empty_columns = np.where(data['bw'].max(axis=0) > 0)[0]
-           print('reading2a1a3')
            non_empty_rows = np.where(data['bw'].max(axis=1) > 0)[0]
-           print('reading2a1a4')
            # crop out letter and pillarbox
            #  don't do this if we get a null  - its a scene break
            #  TODO: don't do this unless the height and width is changing by a lot
-           print('reading2a1a')
            if len(non_empty_rows) > 200 and len(non_empty_columns) > 200 and min(non_empty_columns) > 0:
              #data['rframe'] = data['raw'][min(non_empty_rows):max(non_empty_rows)+1,min(non_empty_columns):max(non_empty_columns)+1:]
              data['rframe'] = data['raw'][0:HEIGHT,min(non_empty_columns):max(non_empty_columns)+1:]
@@ -947,34 +742,25 @@ class FileVideoStream:
 
            data['height'], data['width'], data['channels'] = data['rframe'].shape
            data['frame'] = data['rframe']
-           print('reading2a1b')
            data['frame_mean'] = np.sum(data['rframe']) / float(data['rframe'].shape[0] * data['rframe'].shape[1] * data['rframe'].shape[2])
            data['hist'] = cv2.calcHist([data['rframe']], [0, 1, 2], None, [8, 8, 8],[0, 256, 0, 256, 0, 256])
            data['hist'] = cv2.normalize(data['hist'],5).flatten()
-           print('reading2a1c')
            hist = data['hist']
            hist = hist.ravel()/hist.sum()
            logs = np.log2(hist+0.00001)
            data['contrast'] = -1 * (hist*logs).sum()
 
-           print('reading2a1d')
-
            data['small'] = cv2.resize(data['rframe'],(int(data['rframe'].shape[:2][1] * mser_scaler),int(data['rframe'].shape[:2][0] * mser_scaler)))
            data['gray'] = cv2.cvtColor(data['small'],cv2.COLOR_BGR2GRAY)
-           print('reading2a1e')
          else:
-           print('reading2a1')
            time.sleep(1/FPS)
-           #raw_image = bytes()
-           print("warning video underrun2",len(raw_image))
+           #print("warning video underrun2",len(raw_image))
            continue
 
 
 ###### transcription
          if self.tas and self.tas.transcribe and self.tas.transcribe.stdout:
-           print('reading3')
            frame_transcribe = self.tas.transcribe.stdout.read(4096)
-           print('reading4')
            if frame_transcribe is not None:
              data['transcribe'] = frame_transcribe.decode('ascii')
              print("  Transcribe:",len(play_audio),frame_transcribe)
@@ -983,19 +769,14 @@ class FileVideoStream:
          read_frame += 1
          # drop frames if necessary, only if URL 
          #if self.stream[:4] == 'rtsp' or self.stream[:4] == 'http') and self.Q.qsize() < 1000:
-         print('done',read_frame)
          self.Q.put(data)
-         time.sleep(0.01)
-
-     os.close(self.video_fifo)
-     os.close(self.audio_fifo)
+         time.sleep(0.001)
 
   def read(self):
     return self.Q.get()
 
   def stop(self):
-    print('stop!')
-    self.stopped.value = 1
+    self.stopped = True
 
 #
 # Turn the output from the lavfi filter into a dict with timestamps
@@ -1113,7 +894,6 @@ if 1==1:
         last_caption = ''
         cap_buf = ''
 
-        text_id = 0
         scene_count = 0
         logo_detect_count = 0
         scene_detect = 0
@@ -1139,6 +919,8 @@ if 1==1:
         start_time = time.time()
         channel1 = pygame.mixer.Channel(0)
 
+        tmp_pipes = []
+
         logo_rects = []
         oi_rects = []
         kitti_rects = []
@@ -1153,7 +935,10 @@ if 1==1:
         gray_cnts = []
         last_gray_cnts = []
         scene_faces = []
+        scene_words = []
+        scene_vehicles = []
         scene_text = []
+        scene_stuff = []
         shot_faces = []
         last_frames = []
         last_hist = []
@@ -1174,9 +959,8 @@ if 1==1:
 
         cast_video = bytearray()
 
-        while fvs.stopped.value == 0:
+        while fvs.stopped is False:
           if fvs.Q.qsize() < 1:
-            print('sleeping',fvs.t.pid)
             time.sleep(0.1)
             continue
 
@@ -1202,9 +986,9 @@ if 1==1:
           waitkey = smoothWait()
           fvs.ff = False
 
-          print("output_b",time.time() - start,fvs.Q.qsize())
+          #print("output_b",time.time() - start,fvs.Q.qsize())
           data = fvs.read()
-          print("output_c",time.time() - start,fvs.Q.qsize())
+          #print("output_c",time.time() - start,fvs.Q.qsize())
           image_np = data['frame']
           original_frame = image_np
 
@@ -1352,32 +1136,46 @@ if 1==1:
 
 ########
 #
+          frame_type = '%s%s%d' % (audio_type,shot_type,break_count)
+          #if shot_detect == frame and shot_detect > last_shot + 1:
+          if shot_detect == frame:
+            shottime = datetime.datetime.utcnow().utcfromtimestamp((last_shot + break_count) / FPS).strftime('%H:%M:%S')
+            adj = ''
+            for rect in oi_rects:
+              if rect[2] in ['poster','billboard',' traffic sign'] and rect[1] > 0.2:
+                adj = 'Information '
+            if 'sign' in shot_summary:
+              adj = 'Information '
+
+            print('\t[%s] Title: Unnamed %sShot %d' % (shottime,adj,frame))
+            print('\t[%s] Length: %.02fs, %d frames' % (shottime,float((frame - last_shot + break_count) / FPS),frame-last_shot + break_count))
+            #print('\t[%s] Detect Method: %s ' % (shottime,frame_type))
+            print('\t[%s] Signature: %s' % (shottime,phash_bits(shot_audioprint)))  
+            if shot_summary:
+              print('\t[%s] Description: %s' % (shottime,titlecase.titlecase(shot_summary)))
+            if prev_scene['caption']:
+              # TODO: this should really be shot_caption. frame needs to roll up to shot
+              print('\t[%s] Caption: %s' % (shottime,frame_caption))
+            if person_rects:
+              print('\t[%s] People: %s' % (shottime,len(person_rects)))
+            if shot_faces:
+              print('\t[%s] Faces: %s' % (shottime,set(shot_faces)))
+            if text_rects:
+              print('\t[%s] Words: %s' % (shottime,len(text_hulls)))
+            print('\t[%s] Voice: %.1f%%' % (shottime,100*shot_voiceprint.count('1') / len(shot_voiceprint)))
+
+
 #  SCENE BREAK DETECTOR
 #
 # reset metrics if we detect scene break
 #
-          frame_type = '%s%s%d' % (audio_type,shot_type,break_count)
-          if shot_detect == frame and (frame-last_shot + break_count > FPS / 2):
-            print('\t[%s] Title: Unamed Shot %d' % (filetime,frame))
-            print('\t[%s] Length: %.02fs %d frames' % (filetime,float((frame - last_shot + break_count) / FPS),frame-last_shot + break_count))
-            print('\t[%s] Detect Method: %s ' % (filetime,frame_type))
-            print('\t[%s] Signature: %s' % (filetime,phash_bits(shot_audioprint)))  
-            if shot_summary:
-              print('\t[%s] Description: %s' % (filetime,shot_summary.title()))
-            if prev_scene['caption']:
-              # TODO: this should really be shot_caption. frame needs to roll up to shot
-              print('\t[%s] Caption: %s' % (filetime,frame_caption))
-            if shot_faces:
-              print('\t[%s] People: %s' % (filetime,set(shot_faces)))
-            if text_rects:
-              print('\t[%s] Letters: %s' % (filetime,len(text_rects)))
-
 # give a little bit of jitter  
           if audio_detect == frame and frame < shot_detect + 5:
             last_scene = scene_detect 
             scene_detect = frame
             # TODO: make this based on break_count instead
             if (frame - last_scene) / FPS > 1:
+              scenetime = datetime.datetime.utcnow().utcfromtimestamp((last_scene + break_count) / FPS).strftime('%H:%M:%S')
               prev_scene = {}
               prev_scene['length'] = float((frame - last_scene + break_count) / FPS)
               if com_detect != 'Programming' and int(prev_scene['length']) in [10,15,30,45,60]:
@@ -1387,20 +1185,24 @@ if 1==1:
               prev_scene['type'] = com_detect
               prev_scene['detect'] = frame_type
 
-              print('[%s] Title: Unnamed %s' % (filetime,com_detect))
-              #print('[%s] Source: %s' % (filetime,fvs.stream))  
-              print('[%s] Length: %.02fs' % (filetime,prev_scene['length']))  
-              #print('[%s] Type: %s ' % (filetime,com_detect))
-              print('[%s] Detect Method: %s ' % (filetime,prev_scene['detect']))  
-              print('[%s] Signature: %s' % (filetime,prev_scene['fingerprint']))  
+              print('[%s] Title: Unnamed %s' % (scenetime,com_detect))
+              print('[%s] Length: %.02fs, %d frames' % (scenetime,prev_scene['length'],frame - last_scene + break_count))  
+              #print('[%s] Detect Method: %s ' % (filetime,prev_scene['detect']))  
+              print('[%s] Signature: %s' % (scenetime,prev_scene['fingerprint']))  
               if shot_summary:
-                print('[%s] Description: %s' % (filetime,shot_summary.title()))
+                print('[%s] Description: %s' % (scenetime,titlecase.titlecase(shot_summary)))
               if prev_scene['caption']:
-                print('[%s] Caption: %s' % (filetime,prev_scene['caption']))
-              if scene_faces:
-                print('[%s] People: %s' % (filetime,set(scene_faces)))
+                print('[%s] Caption: %s' % (scenetime,prev_scene['caption']))
+              if len(scene_words) > 0:
+                print('[%s] Gist: %s' % (scenetime,set(scene_words)))
               if scene_text:
-                print('[%s] Letter Shots: %s' % (filetime,len(scene_text)))
+                print('[%s] Words: %s' % (scenetime,len(scene_text)))
+              if len(scene_faces) > 0:
+                print('[%s] Faces: %s' % (scenetime,set(scene_faces)))
+              if len(scene_stuff) > 0:
+                print('[%s] Objects: %d' % (scenetime,len(scene_stuff)))
+              if scene_vehicles:
+                print('[%s] Vehicles: %s' % (scenetime,len(scene_vehicles)))
 
               caption_end = ''
               frame_caption = ''
@@ -1410,6 +1212,10 @@ if 1==1:
               logo_detect_count = 0
               scene_count += 1
               scene_faces = []
+              scene_words = []
+              scene_stuff = []
+              scene_vehicles = []
+              scene_text = []
               com_detect = 'Segment'
             scene_shotprint = '0b'
           #print("output_10",time.time() - start)
@@ -1422,8 +1228,22 @@ if 1==1:
 # if we detect this is a new shot, then all of the detection needs to be redone
           #print("output_0",time.time() - start)
           if shot_detect == frame:
-            scene_text.append(text_hulls)
+            scene_text.extend(text_hulls)
+            for rect in oi_rects:
+              if rect[1] > 0.8:
+                scene_stuff.append(rect[2])
+            for rect in ssd_rects:
+              if rect[1] > 0.8:
+                scene_stuff.append(rect[2])
+            for rect in kitti_rects:
+              if rect[1] > 0.7:
+                scene_vehicles.append(rect[2])
+            for rect in kitti_rects:
+              if rect[1] > 0.8:
+                scene_vehicles.append(rect[2])
             shot_summary = ''
+            # reset all the OCR if we change shot
+            tmp_pipes = []
             face_rects = []
             person_rects = []
             text_rects = []
@@ -1440,15 +1260,6 @@ if 1==1:
             kitti_tracker = None
             logo_tracker = None
             face_tracker = None
-
-            # drain queues on a shot change
-            while fvs.ocr.input.qsize() > 0:
-               fvs.ocr.input.get()
-            while fvs.ocr.output.qsize() > 0:
-               fvs.ocr.output.get()
-
-            #fvs.ocr.input = multiprocessing.Queue(maxsize=1024)
-            #fvs.ocr.output = multiprocessing.Queue(maxsize=1024)
 
             shot_audioprint = '0b'
             shot_textprint = '0b'
@@ -1470,7 +1281,7 @@ if 1==1:
 # 
 #  (also, this part enqueues the audio to play)
 # 
-          if False and fvs.Q.qsize() > 40 and frame % 30 == 0:
+          if fvs.Q.qsize() > 40 and frame % 30 == 0:
             play_audio = bytearray()
             for i in range(10,40):
               if fvs.Q.queue[i].get('audio'):
@@ -1490,50 +1301,16 @@ if 1==1:
 #  Text is the highest indicator of advertising. Detects individual letters
 #  Runs a neural network underneath
 # 
-          # loop through things that have come back from the ocr subprocess
-          tstart = time.time()
-          while fvs.ocr.output.qsize() > 0:
-            local_id,text,score = fvs.ocr.output.get()
-            i = 0
-            for rect in text_rects:
-              if local_id == rect[4] and int(score) > text_rects[i][2]:
-                text_rects[i][1] = text
-                text_rects[i][2] = int(score)
-                break
-              i += 1
-            if time.time() - tstart > 0.1:
-              print('ocr1b',time.time() - tstart,local_id)
-
           #if frame > 100 and (frame == shot_detect or frame == motion_start or frame == motion_detect) and waitkey > 10:
-          if (frame == shot_detect+7 or frame == shot_detect+17 or frame == shot_detect + 33) or fvs.image or frame % 71 == 0:
+          #if ((frame == shot_detect+1 or frame == shot_detect+17 or frame == shot_detect + 33) or fvs.image or frame % 71 == 0):
+          if (frame == shot_detect+1 or frame == shot_detect+17 or frame == shot_detect + 33) or fvs.image:
             text_frame = frame
-
-            start = time.time()
-            #text_contours,bboxes = mser.detectRegions(data['gray'])
-            #tmp_rects = []
-            #for k, cnt in enumerate(text_contours):
-            #  (x,y,w,h) = cv2.boundingRect(cnt)
-            #  if float(w) / h > 3:
-            #    continue
-            #  rect_area = cv2.contourArea(cnt)
-            #  extent = float(rect_area) / (w*h)
-            #  if extent < 0.2 or extent > 0.9:
-            #    continue
-            #  hull = cv2.convexHull(cnt)
-            #  hull_area = cv2.contourArea(hull)
-            #  if float(rect_area) / hull_area < 0.3:
-            #    continue
-            #  tmp_rects.append(scaleRect([x,y,x+w,y+h],1/mser_scaler,1/mser_scaler))
-            #if time.time() - start > 0.01:
-            #  print("warning mser_done",len(text_hulls),len(tmp_rects),time.time() - start)
-
-            # if its close to horizontal, don't rotate it.  just extract with some extra
-            # consider adding extras 
             old_text_rects = text_rects
             text_rects = []
+            start = time.time()
             if True:
               text_hulls = []
-              im_resized, (ratio_h,ratio_w) = resize_image(data['frame'])
+              im_resized, (ratio_h,ratio_w) = v2dimage.resize_image(data['frame'])
               timer = {'net': 0, 'restore': 0, 'nms': 0}
               start = time.time()
               # text recognition neural network
@@ -1549,25 +1326,33 @@ if 1==1:
                 # less motion tracking on horizontal text probably
                 #  some processed in realtime, some just for records
                 # if there is lots of boxes, just do some
-                tmp_pipes = []
+
+                #
+                # TODO:
+                # Find a way to sort by size and score.  Put the bigger ones in front
+                #
                 for box in boxes:
-                   tstart = time.time()
                    if (box[0][1] - box[1][1]) / data['height'] < 0.05:
                      box[1][1] = box[0][1]
                      box[2][1] = box[3][1]
                      box[1][0] = box[2][0]
                      box[3][0] = box[0][0]
 
-                     # loop through to see if we have any neighbors
-                     # group for accuracy improvements
+                     #loop through to see if we have any neighbors
                      # TODO: omit the neighbors
                      for box2 in boxes:
-                        if box2[0][0] > box[1][0] and box2[0][0] - box[1][0] < data['width'] * 0.05 and abs(box2[0][1] - box[0][1]) < data['height'] * 0.05 and abs(box2[2][1] - box[2][1]) < data['height'] * 0.05:
+                        if box2[0][0] > box[1][0] and box2[0][0] - box[1][0] < data['width'] * 0.02 and abs(box2[0][1] - box[0][1]) < data['height'] * 0.02 and abs(box2[2][1] - box[2][1]) < data['height'] * 0.05:
                           box[1][0] = box2[0][0]
                           box[2][0] = box2[0][0]
+                          #new_boxes.append(box)
+                          # if we have something here, block box2 from showing up or getting OCRed
+
                    box = np.int0(box)
                    hull = cv2.convexHull(box.reshape(-1, 1, 2))
                    text_hulls.append(hull)
+
+                # condense boxes that are on a line into one long one
+                #  ths is really important for accuracy
 
                    (x,y,w,h) = cv2.boundingRect(box)
                    if w < data['width'] * 0.01:
@@ -1577,33 +1362,42 @@ if 1==1:
                      print('skipping small text',h,data['height'])
                      continue
 
-                   detected_id = text_id
                    detected_label = '?'
                    detected_frame = frame
                    detected_confidence = 0
                    rect_center = cntCenter(box)
-
+                   # if its close to horizontal, don't rotate it.  just extract with some extra
+                   # consider adding extras 
                    for trect in old_text_rects:
                      if trect[0][0] < rect_center[0] < trect[0][2] and trect[0][1] < rect_center[1] < trect[0][3]:
                        detected_confidence = trect[2]
                        detected_label = str(trect[1])
                        detected_frame = trect[3]
-                       detected_id = trect[4]
                        # consider reading from subprocess here
                        break
                    # don't OCR every frame (unless this is an image)
-                   if fvs.image or detected_confidence < 90:
-                     lstart = time.time()
-                     tmp = hullHorizontalImage(data['frame'],box)
-                     #fvs.ocr.input.put([text_id,tmp.copy(),detected_label,detected_confidence])
-                     text_id += 1
-                     if time.time() - tstart > 0.01:
-                       print('warning lstart',time.time() - tstart)
-                   #print('\t\tOCR:',detected_label,detected_confidence)
-                   text_rects.append([[box[0][0],box[0][1],box[2][0],box[2][1]],detected_label,detected_confidence,detected_frame,detected_id])
-            if time.time() - start > 0.1:
-              print("warning ocr_done",len(text_hulls),len(text_rects),time.time() - start)
-          #print("output_1",time.time() - start)
+                   #print('frame',frame,detected_frame,detected_confidence)
+                   #if fvs.image or (frame > detected_frame + 5 and time.time() - start < 2):
+                   #if fvs.image or (frame > detected_frame + 5 and detected_confidence < 90):
+                   if fvs.image or (detected_confidence == 0 and len(tmp_pipes) < 16):
+                     tmp = hullHorizontalImage(image_np,box)
+                     tstart = time.time()
+                     # do this as a subprocess, and then rejoin on the read later.  
+                     #ret, img = cv2.imencode(".bmp", tmp)
+                     #$tesseract --version
+                     #tesseract 3.05.01
+                     # leptonica-1.74.4
+                     #   libjpeg 8d (libjpeg-turbo 1.5.2) : libpng 1.6.34 : libtiff 4.0.8 : zlib 1.2.11
+                     _,img = cv2.imencode(".bmp",tmp)
+                     # don't process images I already did...
+                     sp = subprocess.Popen(['tesseract','stdin','stdout','--oem','1','--psm','13','-l','eng','/home/kristopher/tf_files/scripts/tess.config'], stdin=subprocess.PIPE,stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                     sp.stdin.write(img)
+                     sp.stdin.flush()
+                     sp.stdin.close()
+                     tmp_pipes.append([sp,[[x,y,w+x,y+h],detected_label,detected_confidence,detected_frame]])
+                   else:
+                     text_rects.append([[x,y,w+x,y+h],detected_label,detected_confidence,detected_frame])
+
 
 ##########
 # High FPS object detector. Look for stuff that will inform other neural networks
@@ -1639,7 +1433,7 @@ if 1==1:
               # carry over label and frame from previous detection
               detected_frame = frame
               detected_label = ''
-              if ccategory_index[cclasses[0][i]]['name'] == 'person':
+              if ccategory_index[cclasses[0][i]]['name'] in ['person','face']:
                 rect_center = rectCenter(scaleRect(shiftRect(cboxes[0][i]),data['width'],data['height']))
                 for prect in old_person_rects:
                   if prect[0][0] < rect_center[0] < prect[0][2] and prect[0][1] < rect_center[1] < prect[0][3]:
@@ -1717,7 +1511,7 @@ if 1==1:
 #  workers, endorsements, and lots of other things.  Ours is trained on 16 classes including 
 #  dental care, alcohol, and network brands.
 #
-          if (frame == shot_detect+3 or (frame >= motion_start + 10 and frame < motion_start + 10 and frame % 10 == 0) or (frame > subtle_detect and frame < subtle_detect + 30 and frame % 10 == 0) or frame % 601 == 0):
+          if False and (frame == shot_detect+3 or (frame >= motion_start + 10 and frame < motion_start + 10 and frame % 10 == 0) or (frame > subtle_detect and frame < subtle_detect + 30 and frame % 10 == 0) or frame % 601 == 0):
             #print('\t\tlogo detector')
             logo_frame = frame
             start = time.time()
@@ -1779,7 +1573,8 @@ if 1==1:
 # 
           #if oi_sess is not None and (fvs.image or (frame <= shot_detect + 67 and frame % 67 == 0) or frame % 173 == 0):
           #if oi_sess is not None and (fvs.image or (frame <= shot_detect + 32 and frame % 33 == 0) or (frame > motion_detect + 173 and frame % 173 == 0)):
-          if oi_sess is not None and (fvs.image or (frame <= scene_detect + 32 and frame % 33 == 0) or (frame <= shot_detect + 273 and frame % 273 == 0) or (frame > motion_detect + 373 and frame % 373 == 0)):
+          #if oi_sess is not None and (fvs.image or (frame <= scene_detect + 32 and frame % 33 == 0) or (frame <= shot_detect + 273 and frame % 273 == 0) or (frame > motion_detect + 373 and frame % 373 == 0)):
+          if oi_sess is not None and (fvs.image or frame == shot_detect + 3):
             #print('\t\toi detector',frame,local_fps)
             oi_frame = frame
             tstart = time.time()
@@ -1804,6 +1599,7 @@ if 1==1:
                 continue
              # print('\t\toi',ocategory_index[oclasses[0][i]]['name'],w*h,oscore)
 
+
               # only note people if you're really sure
               # TODO: dlib on face? face_rects?
               # Maybe only draw these if they are inside a person
@@ -1813,7 +1609,7 @@ if 1==1:
                 if oscore < 0.3:
                   continue
                 # overwrite the person label with the ID 
-                person_rects.append([scaleRect(shiftRect(oboxes[0][i]),data['width'],data['height']),oscore,ocategory_index[oclasses[0][i]]['name'].lower(),frame])
+                person_rects.append([scaleRect(shiftRect(oboxes[0][i]),data['width'],data['height']),oscore,'Person',frame])
                 # hopefully people_tracker exists?
                 if people_tracker:
                   ok = people_tracker.add(cv2.TrackerKCF_create(),data['gray'],scaleRect(shiftRect(oboxes[0][i]),data['width']*mser_scaler,data['height']*mser_scaler))
@@ -1824,24 +1620,27 @@ if 1==1:
                 kitti_rects.append([scaleRect(shiftRect(oboxes[0][i]),data['width'],data['height']),oscore,ocategory_index[oclasses[0][i]]['name'].lower(),frame])
                 ok = kitti_tracker.add(cv2.TrackerKCF_create(),data['gray'],scaleRect(shiftRect(oboxes[0][i]),data['width']*mser_scaler,data['height']*mser_scaler))
               elif len(oi_rects) < 5:
+              # TODO: Check if this is already in a rect -- if so do not append it
                 oi_rects.append([scaleRect(shiftRect(oboxes[0][i]),data['width'],data['height']),oscore,ocategory_index[oclasses[0][i]]['name'].lower(),frame])
                 ok = oi_tracker.add(cv2.TrackerKCF_create(),data['small'],scaleRect(shiftRect(oboxes[0][i]),data['width']*mser_scaler,data['height']*mser_scaler))
               i += 1
-            if time.time() - tstart > 1:
-              print("warning oi_done",time.time() - start)
+            #if time.time() - tstart > 1:
+            #  print("warning oi_done",time.time() - start)
 
 ###################33
 #   Scene Describer
 #   Takes the image and turns it into text.  This can be used to trigger other detectors or vice versa
 #    Takes 0.4s 
-          if len(oi_rects) > 0 and (frame == shot_detect+37 or fvs.image or (frame > shot_detect + 173 and frame % 173 == 0)):
+          #if len(oi_rects) > 0 and (frame == shot_detect+37 or fvs.image or (frame > shot_detect + 173 and frame % 173 == 0)):
+          #if len(oi_rects) > 0 and (frame == shot_detect+4 or fvs.image):
+          if frame == shot_detect+4 or fvs.image:
             tstart = time.time()
             image_cap = cv2.imencode('.jpg', image_np)[1].tostring()
 
             include_labels = []
-            exclude_labels = []
+            exclude_labels = ['wii']
             # keep gender neutral and low
-            exclude_labels.extend(['men','women','boys','girls','child','guy','girl','boy','man','woman','skateboarder'])
+            exclude_labels.extend(['men','women','boys','girls','child','guy','girl','boy','man','woman','children','male','female','lady','kid','kids','skateboarder','gentleman'])
             if len(person_rects) == 0 or person_rects[0][1] < 0.5:
               exclude_labels.extend(['person','people'])
             elif len(person_rects) == 1 and person_rects[0][1] > 0.6:
@@ -1851,23 +1650,6 @@ if 1==1:
             else:
               exclude_labels.extend(['person','people'])
 
-            # TODO: do this with the whole COCO set
-            if 'toilet' not in include_labels:
-              exclude_labels.append('toilet')
-            if 'wii' not in include_labels:
-              exclude_labels.append('wii')
-            if 'cell phone' not in include_labels:
-              exclude_labels.extend(['cell','phone','cellphone'])
-            if 'scissors' not in include_labels:
-              exclude_labels.append('scissors')
-            if 'parking meter' not in include_labels:
-              exclude_labels.extend(['parking','meter'])
-            if 'fire hydrant' not in include_labels:
-              exclude_labels.extend(['fire','hydrant'])
-            if 'boat' not in include_labels:
-              exclude_labels.append('boat')
-              
-              
             if len(kitti_rects) > 0:
               for i, rect in enumerate(kitti_rects):
                 include_labels.extend(rect[2].split())
@@ -1879,7 +1661,10 @@ if 1==1:
             else:
               for i, rect in enumerate(ssd_rects):
                 include_labels.extend(rect[2].split())
-            #    print('ssd_rect',i,rect[1],rect[2])
+
+            if 'cell phone' not in include_labels:
+              exclude_labels.extend(['mobile','cellphone','cell'])
+
 
             appearances = defaultdict(int)
             for curr in include_labels:
@@ -1888,6 +1673,8 @@ if 1==1:
               # naive nlp right now
               if appearances[curr] > 1 and curr[:-1] is not 's':
                 include_labels.extend(['%ss' % curr])
+
+            exclude_labels.extend(list(set(all_stuff) - set(include_labels)))
 
             # Note: I implemented modifications to the beam search
             # TODO: remove captions that are repeats (boring, not interesting: a hat is next to a hat)
@@ -2052,6 +1839,14 @@ if 1==1:
           if len(ssd_rects) > 0:
             #setLabel(image_np, "OBJECT1: %d" % len(ssd_rects),295)
             for rect in ssd_rects:
+              if rect[1] < 0.6 and frame < rect[3] + 10:
+                break
+              if rect[1] < 0.5 and frame < rect[3] + 20:
+                break
+              if rect[1] < 0.4 and frame < rect[3] + 40:
+                break
+              if rect[1] < 0.3 and frame < rect[3] + 50:
+                break
               label = rect[2].title()
               text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 1)[0]
 
@@ -2108,6 +1903,13 @@ if 1==1:
             #setLabel(image_np, "PEOPLE: %d" % len(person_rects),335)
             appearances = defaultdict(int)
             for rect in person_rects:
+              if rect[1] < 0.6 and frame < rect[3] + 10:
+                break
+              if rect[1] < 0.5 and frame < rect[3] + 20:
+                break
+              if rect[1] < 0.4 and frame < rect[3] + 40:
+                break
+
               if len(person_rects) > 3 and rect[1] < 0.6:
                 break
               if len(person_rects) > 2 and rect[1] < 0.5:
@@ -2116,13 +1918,19 @@ if 1==1:
                 break
               if len(person_rects) > 0 and rect[1] < 0.3:
                 break
-              label = "%s" % rect[2]
+              age = frame-rect[3]
+              #label = "%s %.2f %d" % (rect[2],rect[1],age)
+              label = rect[2]
               appearances[label] += 1
               # Don't write 2 people with the same label
               if label[:4] == 'CELE' and appearances[label] > 1:
                 continue
+             
+              if age > 128:
+                age = 128
+
               text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 1)[0]
-              cv2.rectangle(image_np, (rect[0][0], rect[0][1]+text_size[1]+10), (rect[0][0]+text_size[0]+10, rect[0][1]), (0,255,0), cv2.FILLED)
+              cv2.rectangle(image_np, (rect[0][0], rect[0][1]+text_size[1]+10), (rect[0][0]+text_size[0]+10, rect[0][1]), (0,255-age,0), cv2.FILLED)
               #if frame < rect[3] + FPS/2 and len(person_rects) < 3:
               #  cv2.rectangle(image_np, (rect[0][0], rect[0][1]), (rect[0][2],rect[0][3]), (0, 255, 0), 1)
               cv2.putText(image_np, label ,(rect[0][0]+5, rect[0][1]+text_size[1]+5),cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
@@ -2154,21 +1962,47 @@ if 1==1:
             for hull in face_hulls:
               cv2.polylines(image_np, [hull], False, (0, 255, 0), 1)
 
+########33
+#  subpocess harvestor 
+#
+          busy_pipes = []
+          for pipe in tmp_pipes:
+            if pipe[0].poll() is not None:
+              busy_pipes.append(pipe)
+
+            # see if this is ready for reading first.  If so, then read it
+            # otherwise skip it and come back later
+            tmp_data = pipe[0].stdout.read()
+            detected_label = pipe[1][1]
+            detected_confidence = pipe[1][2]
+            detected_frame = pipe[1][3]
+            for line in tmp_data.decode('utf-8').split('\n'):
+              col = line.split('\t')
+              if len(col) > 10 and col[10].isdigit() and int(col[10]) > 0 and int(col[10]) > detected_confidence:
+                detected_confidence = int(col[10])
+                detected_label = col[11]
+                if detected_confidence > 80 and len(detected_label) > 4 or detected_confidence > 90 and len(detected_label) > 2:
+                  scene_words.append(detected_label)
+                  #print('\t\t\tconf',pipe[1][0][2] - pipe[1][0][0],col[8],col[10],col[11])
+                #print('\t\tOCR:',detected_label,detected_confidence)
+              text_rects.append([pipe[1][0],detected_label,detected_confidence,detected_frame])
+          tmp_pipes = busy_pipes    
+
 # TODO: Use this to inform the commercial vs programming
           if len(text_rects) > 0:
             for rect in text_rects:
-              if rect[2] >= 0:
-                label = '%s : %d' % (rect[1],rect[2])
-                text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 1)[0]
-                cv2.rectangle(image_np, (rect[0][0],rect[0][1]),(rect[0][0]+text_size[0]+10,rect[0][1]+text_size[1]+10), (255,255,255), cv2.FILLED)
-                cv2.putText(image_np, label ,(rect[0][0]+5, rect[0][1]+text_size[1]+5),cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+              if rect[2] > 80 and '?' not in rect[1]:
+                label = rect[1]
+                text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
+                cv2.rectangle(image_np, (rect[0][0],rect[0][1]),(rect[0][0]+text_size[0]+10,rect[0][1]+text_size[1]+10), (0,0,0), cv2.FILLED)
+                cv2.putText(image_np, label ,(rect[0][0]+5, rect[0][1]+text_size[1]+5),cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
             shot_textprint += '1'
           else:
             shot_textprint += '0'
 
-          if len(text_hulls) > 0:
-            for hull in text_hulls:
-              cv2.polylines(image_np, [hull], False, (255, 255, 255), 1)
+         # if len(text_hulls) > 0:
+         #   for hull in text_hulls:
+         #     cv2.polylines(image_np, [hull], False, (255, 255, 255), 1)
 
           #if len(gray_cnts) > 0:
           #  cv2.polylines(image_np,[p.reshape(-1, 1, 2) * int(1/mser_scaler) for p in gray_cnts], False, (0, 255, 0), 1)
@@ -2233,6 +2067,9 @@ if 1==1:
 
           if frame % 30 == 0:
             cap_buf = phash_bits(scene_shotprint)
+          #if fvs.image is None:
+
+
           setLabel(image_np,"Title: Unnamed %s (%.1fs)" % (prev_scene['type'],float((frame - last_scene + break_count) / FPS)),550)
           setLabel(image_np,' Sig: %s' % cap_buf  ,575)
           if scene_caption:
@@ -2271,30 +2108,21 @@ if 1==1:
             waitkey += tmp
 
           #if fvs.Q.qsize() < 2000 or fvs.Q.qsize() > 900:
-          if True:
+          if fvs.image is None:
             setLabel(cast_frame, "FBUF: %d (%dms)" % (fvs.Q.qsize(),waitkey),115)
             setLabel(cast_frame, "FRAM: %d (%.3ffps)" % (fps_frame,fps_frame / (time.time() - start_time)),135)
             setLabel(cast_frame, "REAL: %s" % filetime,155)
             setLabel(cast_frame, "VIEW: %s" % frametime,175)
 
           cv2.imshow('Object Detection',cast_frame)
+          cv2.imwrite('/tmp/demo/frame.%05d.bmp' % frame,cast_frame)
+
           if fvs.image:
              # an hour?
              waitkey = 60*60*1000
           key = cv2.waitKey(waitkey) 
           if 'c' == chr(key & 255):
             fvs.stop()
-            #fvs.Q = None
-            #fvs.t.terminate()
-            #fvs.ocr.t.terminate()
-            while fvs.Q.qsize() > 0:
-               fvs.Q.get()
-            while fvs.ocr.input.qsize() > 0:
-               fvs.ocr.input.get()
-            while fvs.ocr.output.qsize() > 0:
-               fvs.ocr.output.get()
-            fvs.t.join()
-            print('done')
             break
           elif 's' == chr(key & 255):
             fvs.ff = True

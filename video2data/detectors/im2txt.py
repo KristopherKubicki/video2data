@@ -1,6 +1,6 @@
 #!/usr/bin/python3 
 
-load up the im2txt captioner.  This is used to describe shots
+#load up the im2txt captioner.  This is used to describe shots
 #  mine is trained against mscoco.  This will be a rapidly advancing area
 sys.path.append('/home/kristopher/models/research/im2txt')
 from im2txt import configuration
