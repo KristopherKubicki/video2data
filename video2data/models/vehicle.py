@@ -9,7 +9,7 @@ sys.path.append('/home/kristopher/models/research/object_detection')
 from utils import label_map_util
 
 #
-# A car / pedestrian favored model, good for exterior cameras
+# A car / pedestrian flavored model, good for exterior cameras
 #  It takes 0.04s for 1080p
 #  
 # http://download.tensorflow.org/models/object_detection/faster_rcnn_resnet101_kitti_2017_11_08.tar.gz
