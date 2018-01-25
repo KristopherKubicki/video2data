@@ -75,7 +75,6 @@ class nnText:
         text_hulls.append(hull)
      
     # TODO: collapse overlapping hulls
-
     return text_hulls
 
 

@@ -16,8 +16,8 @@ def phash_bits(bitstring):
 #
 # General timing configurations for queue sizes. Simple time shifting
 #
-def smoothWait():
-  waitkey = int(1000 / FPS)
+def smoothWait(fvs):
+  waitkey = int(1000 / fvs.fps)
 
   qsize = fvs.Q.qsize()
   if qsize > 320:

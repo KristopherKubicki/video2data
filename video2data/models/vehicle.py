@@ -13,19 +13,19 @@ from utils import label_map_util
 #  It takes 0.04s for 1080p
 #  
 # http://download.tensorflow.org/models/object_detection/faster_rcnn_resnet101_kitti_2017_11_08.tar.gz
-class nnVehicles:
+class nnVehicle:
   
   def load(self):
-    print("loading KITTI (car, people)")
+    print("loading vehicle detection")
     kitti_graph = tf.Graph()
     with kitti_graph.as_default():
       kitti_graph_def = tf.GraphDef()
-      with tf.gfile.GFile('models/vehicles/frozen_inference_graph.pb', 'rb') as fid:
+      with tf.gfile.GFile('models/vehicle/frozen_inference_graph.pb', 'rb') as fid:
         serialized_graph = fid.read()
         kitti_graph_def.ParseFromString(serialized_graph)
         tf.import_graph_def(kitti_graph_def, name='kitti')
 
-    self.klabel_map = label_map_util.load_labelmap('models/vehicles/kitti_label_map.pbtxt')
+    self.klabel_map = label_map_util.load_labelmap('models/vehicle/kitti_label_map.pbtxt')
     self.kcategories = label_map_util.convert_label_map_to_categories(self.klabel_map, max_num_classes=NUM_CLASSES, use_display_name=True)
     self.kcategory_index = label_map_util.create_category_index(self.kcategories)
 

@@ -13,6 +13,7 @@ import time
 from fcntl import fcntl, F_GETFL, F_SETFL, ioctl
 import cv2
 import numpy as np
+import re
 
 #
 # given a segment of audio, determine its energy
@@ -233,6 +234,7 @@ class FileVideoStream:
          rstart = time.time()
          data = {}
          data['speech_level'] = 0.0
+         data['fps'] = self.fps
 
 ###### captions
 #  4096 was kind of chosen at random.  Its a nonblocking read
@@ -325,6 +327,7 @@ class FileVideoStream:
 
            data['height'], data['width'], data['channels'] = data['rframe'].shape
            data['frame'] = data['rframe']
+           data['scale'] = self.scale
            data['frame_mean'] = np.sum(data['rframe']) / float(data['rframe'].shape[0] * data['rframe'].shape[1] * data['rframe'].shape[2])
            data['hist'] = cv2.calcHist([data['rframe']], [0, 1, 2], None, [8, 8, 8],[0, 256, 0, 256, 0, 256])
            data['hist'] = cv2.normalize(data['hist'],5).flatten()
