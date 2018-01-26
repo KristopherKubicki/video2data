@@ -1,1 +1,1 @@
-model_checkpoint_path: "/home/kristopher/tf_files/scripts/video2data/video2data/models/im2txt/model.ckpt-1311071"
+model_checkpoint_path: "models/im2txt/model.ckpt-1311071"

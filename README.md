@@ -42,6 +42,13 @@ Some of the newest advances in object recognition allow us to recognize just abo
 
 # Requirements
 
+* python3
+* tesseract 4.00.00alpha
+    leptonica-1.74.4
+      libjpeg 8d (libjpeg-turbo 1.5.2) : libpng 1.6.34 : libtiff 4.0.8 : zlib 1.2.11
+* ffmpeg version 3.3.4-2
+
+
 The v2d codebase relies heavily on GPU-optimized libraries.  Please review requirements.txt for the full list.  In addition, a powerful computer is recommended.  
 
 # Installation

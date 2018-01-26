@@ -26,7 +26,7 @@ import cv2
 import numpy as np
 
 
-image_np = cv2.imread("/home/kristopher/tf_files/scripts/test.jpg")
+image_np = cv2.imread("data/test.png")
 image_np_expanded = np.expand_dims(image_np, axis=0)
 
 import models.face
@@ -382,7 +382,7 @@ if 1==1:
                      #   libjpeg 8d (libjpeg-turbo 1.5.2) : libpng 1.6.34 : libtiff 4.0.8 : zlib 1.2.11
                      _,img = cv2.imencode(".bmp",tmp)
                      # TODO: don't process images I already did...
-                     sp = subprocess.Popen(['tesseract','stdin','stdout','--oem','1','--psm','13','-l','eng','/home/kristopher/tf_files/scripts/tess.config'], stdin=subprocess.PIPE,stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                     sp = subprocess.Popen(['tesseract','stdin','stdout','--oem','1','--psm','13','-l','eng','config/tess.config'], stdin=subprocess.PIPE,stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
                      sp.stdin.write(img)
                      sp.stdin.flush()
                      sp.stdin.close()
