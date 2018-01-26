@@ -50,6 +50,13 @@ The project aims to develop a docker and/or kubernetes image.  Currently it has 
 
 Due to the way the program pipes FIFO traffic between processes, it is recommended to only use Linux.  My development machine is Ubuntu 17.10.
 
+1. Clone repo
+2. $ cd video2data/models/
+2. Download <a href='https://drive.google.com/uc?export=download&id=1rdh6dNliIIOOdrX_zY-7ruam8Kzc13yZ'>pre-trained models</a>
+3. $ tar zxvf models.tgz .
+4. $ cd ..
+5. $ ./v2d.py
+
 # Usage
 
 v2d has many applications ranging from security and home automation to advertising and analytics. 

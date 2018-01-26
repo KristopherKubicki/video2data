@@ -9,5 +9,6 @@ __pycache__
 *.data-00000-of-00001
 *.meta
 *.dead
+models.tgz
 
 sources.txt
