@@ -99,7 +99,7 @@ class FileVideoStream:
       self.stream = str.replace(self.stream,'@','\\\@')
  
       # we should probably always stick to 're' for most video
-      video_command = [ 'ffmpeg','-nostdin','-hide_banner','-loglevel','panic','-hwaccel','vdpau','-y','-f', 'lavfi','-i','movie=%s:s=0\\\:v+1\\\:a[out0+subcc][out1]' % self.stream,'-map','0:v','-vf','scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2' % (self.width,self.height,self.width,self.height),'-pix_fmt','bgr24','-r','%f' % self.fps,'-s','%dx%d' % (self.width,self.height),'-vcodec','rawvideo','-f','rawvideo','/tmp/%s_video' % self.name, '-map','0:a','-acodec','pcm_s16le','-r','%f' % self.fps,'-ab','16k','-ar','%d' % self.sample,'-ac','1','-f','wav','/tmp/%s_audio' % self.name, '-map','0:s','-f','srt','/tmp/%s_caption' % self.name  ] 
+      video_command = [ 'ffmpeg','-nostdin','-hide_banner','-loglevel','info','-hwaccel','vdpau','-y','-f', 'lavfi','-i','movie=%s:s=0\\\:v+1\\\:a[out0+subcc][out1]' % self.stream,'-map','0:v','-vf','scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2' % (self.width,self.height,self.width,self.height),'-pix_fmt','bgr24','-r','%f' % self.fps,'-s','%dx%d' % (self.width,self.height),'-vcodec','rawvideo','-f','rawvideo','/tmp/%s_video' % self.name, '-map','0:a','-acodec','pcm_s16le','-r','%f' % self.fps,'-ab','16k','-ar','%d' % self.sample,'-ac','1','-f','wav','/tmp/%s_audio' % self.name, '-map','0:s','-f','srt','/tmp/%s_caption' % self.name  ] 
       self.pipe = subprocess.Popen(video_command)
 
       print('Step 2 initializing video /tmp/%s_video' % self.name)
@@ -131,11 +131,14 @@ class FileVideoStream:
 
       self.pipe = subprocess.Popen(video_command)
       print('fifo: /tmp/%s_video' %self.name)
-      self.video_fifo = open('/tmp/%s_video' % self.name,'rb',self.width*self.height*3*10)
+      self.video_fifo = os.open('/tmp/%s_video' % self.name,os.O_RDONLY | os.O_NONBLOCK,self.width*self.height*3*10)
     else:
       print("unrecognized input")
       return
  
+    self.audio_poll = None
+    self.video_poll = None
+    self.caption_poll = None
     if self.caption_fifo:
       self.caption_poll = select.poll()
       self.caption_poll.register(self.caption_fifo,select.POLLIN)
@@ -234,6 +237,8 @@ class FileVideoStream:
 
      start_talking = 0
      no_talking = 0
+
+     data_buff = []
 
      play_audio = bytearray()
      raw_audio = bytes()
@@ -403,13 +408,26 @@ class FileVideoStream:
          if self.audio_fifo and self.video_fifo:
            if data.get('audio') is not None and data.get('rframe') is not None:
              self.microclockbase += 1 / self.fps
+             # buffer this for 30 frames and send them all at the same time
+             #  this way we can stitch the audio together 
+             if read_frame % self.fps == 0:
+               play_audio = bytes()
+               for buf in data_buff:
+                 self.Q.put_nowait(buf)
+                 # TODO: if no audio, pad with zero bytes
+                 play_audio += buf['audio']
+               data_buff = []
+               data['play_audio'] = play_audio
+               data['play_audio'] += data['audio']
+               self.Q.put_nowait(data)
+             else:
+               data_buff.append(data)
              read_frame += 1
-             self.Q.put_nowait(data)
          elif self.video_fifo or self.image:
            if data.get('rframe') is not None:
              self.microclockbase += 1 / self.fps
-             read_frame += 1
              self.Q.put_nowait(data)
+             read_frame += 1
       
          time.sleep(0.0001)
 
@@ -423,7 +441,7 @@ class FileVideoStream:
 
   def stop(self):
     print('stop!')
-    self.stopped.value = multiprocessing.Value('i',1)
+    self.stopped.value = 1
     for i in range(self.Q.qsize()):
       self.Q.get()
     self.Q = None

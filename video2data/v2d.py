@@ -74,16 +74,10 @@ import datetime
 # facial detection
 import dlib
 
-# Originally I used a basic Thread to power the event loop.  It has a way to call a deque, which I used for the audio.
-#  when I swithced to multiprocessing, I couldn't peek ahead on the queue, and thus couldnt do audio.  The application
-# needs multiprocessing badly!
-import threading
-
 # A few subprocesses open pipes into the 
 import subprocess
 import time
 import re
-from queue import Queue
 # encode 128D vectors for facial fingerprints
 import base64
 
@@ -128,6 +122,9 @@ if 1==1:
     all_faces = []
     while True:
       for source in sources:
+        if source[0] == '#':
+          continue
+
         fvs = streams.read.FileVideoStream(source).load(WIDTH,HEIGHT,FPS,SAMPLE)
         print('source: %s' % source)
         print('stopped',fvs.stopped)
@@ -190,6 +187,15 @@ if 1==1:
               break
             time.sleep(0.1)
             continue
+
+          data = fvs.read()
+
+# play the audio
+          if fvs.display and data.get('play_audio') is not None:    
+            play_audio = pygame.mixer.Sound(data.get('play_audio'))
+            sound1 = pygame.mixer.Sound(play_audio)
+            channel1.queue(sound1)
+
 
           frametime = datetime.datetime.utcnow().utcfromtimestamp(frame / fvs.fps).strftime('%H:%M:%S')
           filetime = datetime.datetime.utcnow().utcfromtimestamp(fvs.microclockbase + fvs.clockbase).strftime('%H:%M:%S')
@@ -332,17 +338,6 @@ if 1==1:
 #  this clip exists already.  Can be pretty low quality fingerprint, as long as it is 
 #  fast.  Also, it's OK to wait a few seconds.  Longer segments take less storage to fingerprint
 # 
-#  (also, this part enqueues the audio to play)
-# 
-          if fvs.display and fvs.Q.qsize() > 40 and frame % 30 == 0:
-            play_audio = bytearray()
-            for i in range(10,40):
-              if fvs.Q.queue[i].get('audio'):
-                play_audio += pygame.mixer.Sound(fvs.Q.queue[i]['audio'])
-            if play_audio is not None:    
-              sound1 = pygame.mixer.Sound(play_audio)
-              channel1.queue(sound1)
-
 ###############
 #
 #  Text is the highest indicator of advertising. Detects individual letters
@@ -914,16 +909,18 @@ if 1==1:
               print("warn slow writing",time.time() - tstart)
 
 # 
+# TODO
 # Pause a little longer between frames if we are going faster than
-#  the FPS as defined
+#  the FPS as defined. potentially go the other way too
 #
-          if frame > 100 and local_fps > FPS:
-            tmp = int(local_fps-FPS) * 10 
+          if False and fvs.display and frame > 100 and local_fps > FPS:
+            tmp = (local_fps-FPS)  / 60
             if tmp > 30:
               tmp = 30
-            waitkey += tmp
+            waitkey += int(tmp)
 
           #cv2.imwrite('/tmp/demo_5/frame.%05d.bmp' % frame,cast_frame)
+
           if fvs.display is False:
             continue
 
@@ -931,6 +928,10 @@ if 1==1:
           if fvs.image:
              # an hour?
              waitkey = 60*60*1000
+
+# WAITKEY
+          waitkey = 1
+
           key = cv2.waitKey(waitkey) 
           if 'c' == chr(key & 255):
             fvs.stop()
