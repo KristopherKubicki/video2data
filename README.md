@@ -57,7 +57,7 @@ v2d has many applications ranging from security and home automation to advertisi
 ```
 $ v2d.py --input garden.jpg
 ```
-Runs v2d against an image, taking extra time to enhance the image, recognizing objects and summarizing the scene as a caption.  v2d will also take additional time to do deep text recognition, converting an written words to text.
+Runs v2d against an image, taking extra time to enhance the image, recognizing objects and summarizing the scene as a caption.  v2d will also take additional time to do deep text recognition, converting any written words to text.
 
 <img src='https://user-images.githubusercontent.com/478212/35298114-bf1fbda6-0046-11e8-99c1-a5dd2ad12f12.png'>
 

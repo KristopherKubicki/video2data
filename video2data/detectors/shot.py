@@ -4,6 +4,7 @@
 import cv2
 import numpy as np
 from utils2 import image as v2dimage
+import time
 
 #
 # Motion and Shot Detection. 
@@ -17,14 +18,19 @@ def frame_to_contours(frame,last_frame):
   #  blurs are also a way to get at that
   frame['shot_type'] = ''
   if last_frame.get('gray') is not None and frame.get('gray') is not None and last_frame.get('gray').shape == frame.get('gray').shape:
-    h1,w1 = last_frame.get('gray').shape
-    frame_delta = cv2.absdiff(last_frame['gray'], frame['gray'])
-    frame_delta = cv2.blur(frame_delta,(10,10))
-    thresh = cv2.threshold(frame_delta, 25, 255, cv2.THRESH_BINARY)[1]
+    frame['gray_motion_mean'] = cv2.norm(last_frame['gray'], frame['gray'],cv2.NORM_L1) / float(frame['gray'].shape[0] * frame['gray'].shape[1])
+    
+    if frame['gray_motion_mean'] > 1:
+      start = time.time() 
+      frame_delta = cv2.absdiff(last_frame['gray'], frame['gray'])
+      frame_delta = cv2.blur(frame_delta,(10,10))
+      thresh = cv2.threshold(frame_delta, 25, 255, cv2.THRESH_BINARY)[1]
+      frame['gray_motion_mean'] = np.sum(thresh) / float(thresh.shape[0] * thresh.shape[1])
+      motion_cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)[1]
+      frame['motion_hulls'] = [cv2.convexHull(p.reshape(-1, 1, 2) * int(1/frame['scale'])) for p in motion_cnts]
+    else:
+      frame['motion_hulls'] = []
 
-    motion_cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)[1]
-    frame['motion_hulls'] = [cv2.convexHull(p.reshape(-1, 1, 2) * int(1/frame['scale'])) for p in motion_cnts]
-    frame['gray_motion_mean'] = np.sum(thresh) / float(thresh.shape[0] * thresh.shape[1])
     frame['edges'] = cv2.Canny(frame['gray'],100,200)
   return frame
 
@@ -50,6 +56,14 @@ def frame_to_shots(frame,last_frame):
     frame = audio_shot_detector(frame,last_frame)
 
   frame['frame_type'] = '%s%s%d' % (frame['audio_type'],frame['shot_type'],frame['break_count'])
+  if last_frame['audio_type'] and frame['audio_type'] is '' and frame['shot_type']:
+    frame['audio_type'] = last_frame['audio_type']
+
+  if frame['audio_type'] and frame['shot_type']:
+    if last_frame['scene_detect'] != frame['frame'] - 1:
+      print(frame['frametime'],frame['frame'],'\t',frame['frame_type'])
+      frame['scene_detect'] = frame['frame']
+
   return frame
 
 
@@ -88,7 +102,11 @@ def video_shot_detector(frame,last_frame):
     frame['motion_start'] = frame['motion_detect']
   if frame['shot_detect'] == frame['frame']:
     frame['motion_detect'] = frame['frame']
+    if frame['break_count'] == 0:
+      print('\tvideo',frame['frametime'],frame['frame'],'\t',frame['shot_type'],frame['break_count'])
     frame['break_count'] += 1
+  else:
+    frame['break_count'] = 0
 
   return frame
 
@@ -106,15 +124,20 @@ def audio_shot_detector(frame,last_frame):
     if len(frame['edges']) == 0 or scene_length in [5,10,15,30,45,60,90,120]:
       frame['audio_type'] = 'Hard'
       frame['audio_detect'] = frame['frame']
-    elif frame['audio_level'] < 10 and scene_length in [5,10,15,30,45,60,90,120]:
-      frame['audio_type'] = 'Soft'
-      frame['audio_detect'] = frame['frame']
-    elif frame['audio_level'] < 20 and frame['silence'] > 5:
-      frame['audio_type'] = 'Gray'
-      frame['audio_detect'] = frame['frame']
-    elif frame['audio_level'] < 30 and frame['silence'] > 10:
-      frame['audio_type'] = 'Micro'
-      frame['audio_detect'] = frame['frame']
+  elif frame['audio_level'] < 10 and scene_length in [5,10,15,30,45,60,90,120]:
+    frame['audio_type'] = 'Soft'
+    frame['audio_detect'] = frame['frame']
+  elif frame['audio_level'] < 20 and frame['silence'] > 5:
+    frame['audio_type'] = 'Gray'
+    frame['audio_detect'] = frame['frame']
+  elif frame['audio_level'] < 30 and frame['silence'] > 10:
+    frame['audio_type'] = 'Micro'
+    frame['audio_detect'] = frame['frame']
+
+  if frame['audio_detect'] == frame['frame']:
+    print('\taudio',frame['frametime'],frame['frame'],'\t',frame['audio_type'],frame['break_count'],frame['silence'],frame['audio_level'],frame['speech_level'])
+  elif frame['shot_detect'] == frame['frame']: 
+    print('\t\taudio',frame['frametime'],frame['frame'],'\t',frame['audio_type'],frame['break_count'],frame['silence'],frame['audio_level'],frame['speech_level'])
 
   return frame
 

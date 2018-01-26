@@ -1,9 +1,10 @@
 #!/usr/bin/python3 
 # coding: utf-8
  
-import os
+import os, sys
 import random
 import threading
+import multiprocessing
 import subprocess
 import streams.transcribe
 import streams.transcribe
@@ -14,6 +15,7 @@ from fcntl import fcntl, F_GETFL, F_SETFL, ioctl
 import cv2
 import numpy as np
 import re
+import select
 
 #
 # given a segment of audio, determine its energy
@@ -25,7 +27,8 @@ import re
 #
 def speech_calc(self,raw_audio):
   if len(raw_audio) < 10:
-    return
+    return 0
+
   data_freq = np.fft.fftfreq(len(raw_audio),1.0/self.sample)
   data_freq = data_freq[1:]
   data_ampl = np.abs(np.fft.fft(raw_audio))
@@ -40,6 +43,9 @@ def speech_calc(self,raw_audio):
   for f in energy_freq.keys():
     if 300<f<3000:
       sum_energy += energy_freq[f]
+  if sum_energy < 1:
+    return 0
+
   return sum_energy / sum(energy_freq.values())
 
 # 
@@ -65,11 +71,11 @@ class FileVideoStream:
       self.pipe.terminate()
       #self.pipe.kill()
     if self.video_fifo is not None:
-      self.video_fifo.close()
+      os.close(self.video_fifo)
     if self.audio_fifo is not None:
-      self.audio_fifo.close()
+      os.close(audio_fifo)
     if self.caption_fifo is not None:
-      self.caption_fifo.close()
+      os.close(caption_fifo)
 
     # not thread safe
     if os.path.exists('/tmp/%s_video' % self.name):
@@ -93,7 +99,7 @@ class FileVideoStream:
       self.stream = str.replace(self.stream,'@','\\\@')
  
       # we should probably always stick to 're' for most video
-      video_command = [ 'ffmpeg','-nostdin','-re','-hide_banner','-loglevel','panic','-hwaccel','vdpau','-y','-f', 'lavfi','-i','movie=%s:s=0\\\:v+1\\\:a[out0+subcc][out1]' % self.stream,'-map','0:v','-vf','scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2' % (self.width,self.height,self.width,self.height),'-pix_fmt','bgr24','-r','%f' % self.fps,'-s','%dx%d' % (self.width,self.height),'-vcodec','rawvideo','-f','rawvideo','/tmp/%s_video' % self.name, '-map','0:a','-acodec','pcm_s16le','-r','%f' % self.fps,'-ab','16k','-ar','%d' % self.sample,'-ac','1','-f','wav','/tmp/%s_audio' % self.name, '-map','0:s','-f','srt','/tmp/%s_caption' % self.name  ] 
+      video_command = [ 'ffmpeg','-nostdin','-hide_banner','-loglevel','panic','-hwaccel','vdpau','-y','-f', 'lavfi','-i','movie=%s:s=0\\\:v+1\\\:a[out0+subcc][out1]' % self.stream,'-map','0:v','-vf','scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2' % (self.width,self.height,self.width,self.height),'-pix_fmt','bgr24','-r','%f' % self.fps,'-s','%dx%d' % (self.width,self.height),'-vcodec','rawvideo','-f','rawvideo','/tmp/%s_video' % self.name, '-map','0:a','-acodec','pcm_s16le','-r','%f' % self.fps,'-ab','16k','-ar','%d' % self.sample,'-ac','1','-f','wav','/tmp/%s_audio' % self.name, '-map','0:s','-f','srt','/tmp/%s_caption' % self.name  ] 
       self.pipe = subprocess.Popen(video_command)
 
       print('Step 2 initializing video /tmp/%s_video' % self.name)
@@ -109,9 +115,10 @@ class FileVideoStream:
       #fcntl(self.audio_fifo,1031,6220800)
 
       # TODO: move this to os.open()
-      self.caption_fifo = open('/tmp/%s_caption' % self.name,'rb',4096)
-      flags = fcntl(self.caption_fifo, F_GETFL)
-      fcntl(self.caption_fifo, F_SETFL, flags | os.O_NONBLOCK)
+      #self.caption_fifo = open('/tmp/%s_caption' % self.name,'rb',4096)
+      self.caption_fifo = os.open('/tmp/%s_caption' % self.name,os.O_RDONLY | os.O_NONBLOCK,4096)
+      #flags = fcntl(self.caption_fifo, F_GETFL)
+      #fcntl(self.caption_fifo, F_SETFL, flags | os.O_NONBLOCK)
     #
     # big assumption rtsp stream is h264 of some kind and probably a security camera
     #  it does not handle audio, as the audio not actually in the stream.  Presumably we could mux it here if it exists
@@ -129,15 +136,16 @@ class FileVideoStream:
       print("unrecognized input")
       return
  
+    if self.caption_fifo:
+      self.caption_poll = select.poll()
+      self.caption_poll.register(self.caption_fifo,select.POLLIN)
     if self.video_fifo:
       self.video_poll = select.poll()
       self.video_poll.register(self.video_fifo,select.POLLIN)
     if self.audio_fifo:
       self.audio_poll = select.poll()
       self.audio_poll.register(self.audio_fifo,select.POLLIN)
-
-    time.sleep(5)
-    print('pid:',self.pipe.pid)
+    print('ffmpeg pid:',self.pipe.pid)
 
 #
 # This is the queue that holds everything together
@@ -151,6 +159,10 @@ class FileVideoStream:
       self.image = True
     self.name = 'input_%d_%d' % (os.getpid(),random.choice(range(1,1000)))
 
+    self.display = False
+    if os.environ.get('DISPLAY'):
+      self.display = True
+
     self.caption_guide = {}
     self.filename = None
     self.state = None
@@ -163,7 +175,7 @@ class FileVideoStream:
     self.filepos = 0
     self.clockbase = 0
     self.microclockbase = 0
-    self.stopped = False
+    self.stopped = multiprocessing.Value('i',0)
     self.ff = False
 
     # disabled for now. 
@@ -171,7 +183,8 @@ class FileVideoStream:
     #self.tas = TranscribeAudioStream().load()
 
     # initialize the analyzer pipe
-    self.Q = queue.Queue(maxsize=queueSize)
+    #self.Q = queue.Queue(maxsize=queueSize)
+    self.Q = multiprocessing.Queue(maxsize=queueSize)
 
   def __del__(self):
     # I need to figure out how to get it to reset the console too
@@ -182,14 +195,13 @@ class FileVideoStream:
     if os.path.exists('/tmp/%s_caption' % self.name):
       os.unlink('/tmp/%s_caption' % self.name)
     if self.video_fifo:
-      self.video_fifo.flush()
-      self.video_fifo.close()
+      os.close(self.video_fifo)
     if self.audio_fifo:
-      self.audio_fifo.flush()
-      self.audio_fifo.close()
+      os.close(self.audio_fifo)
     if self.caption_fifo:
-      self.caption_fifo.flush()
-      self.caption_fifo.close()
+      os.close(self.audio_fifo)
+      #self.caption_fifo.flush()
+      #self.caption_fifo.close()
     if self.pipe:
       # not cleanly exiting the threads leads to all kinds of problems, including deadlocks
       outs, errs = self.pipe.communicate(timeout=15)
@@ -205,7 +217,8 @@ class FileVideoStream:
     self.height = height
     self.fps = fps
     self.sample = sample
-    self.t = threading.Thread(target=self.update, args=())
+    #self.t = threading.Thread(target=self.update, args=())
+    self.t = multiprocessing.Process(target=self.update, args=())
     self.t.daemon = True
     self.t.start()
     return self
@@ -214,7 +227,7 @@ class FileVideoStream:
 #  a queue.  the captions go into neverending hash (never gets pruned)
 #  audio goes into a neverending place in memory
   def update(self):
-     print("process!")
+     print("process!",self.stopped.value)
      self.process()
      timeout = 0
      read_frame = 0
@@ -226,11 +239,17 @@ class FileVideoStream:
      raw_audio = bytes()
      raw_image = bytes()
 
-     while self.stopped is False:
+     while self.stopped.value == 0:
+       bstart = time.time() 
        if self.Q.qsize() >= 1024:
+         print('running fast, sleeping')
          time.sleep(0.1)
+         
+       if self.audio_poll is None and self.video_poll is None and self.image is False:
+         print('done')
+         break
 
-       if self.Q.qsize() < 1024:
+       if True:
          rstart = time.time()
          data = {}
          data['speech_level'] = 0.0
@@ -238,21 +257,47 @@ class FileVideoStream:
 
 ###### captions
 #  4096 was kind of chosen at random.  Its a nonblocking read
-         if self.caption_fifo:
-           raw_subs = self.caption_fifo.read(4096)
-           if raw_subs is not None:
+         if self.caption_fifo and self.caption_poll is not None:
+           # doesn't really need to do this on every frame 
+           events = self.caption_poll.poll(1)
+           if len(events) > 0 and not events[0][1] & select.POLLIN:
+             raw_subs = os.read(self.caption_fifo,4096)
              self.parse_caption(raw_subs)
 
 ###### audio
 #  audio is read in, a little bit at a time
-         if self.audio_fifo and self.audio_poll is not None and len(self.audio_poll.poll(1)) > 0:
-           raw_audio = os.read(self.audio_fifo,int(2*self.sample / self.fps))
-           #if raw_audio is None:
-           #  print('warning audio frame empty')
-           if raw_audio is not None:
+         if self.audio_fifo and self.audio_poll is not None and data.get('audio') is None:
+           fail = 0
+           bufsize = int((self.sample*2/self.fps) - len(raw_audio))
+           events = self.audio_poll.poll(1)
+           if len(events) > 0 and not events[0][1] & select.POLLIN:
+             self.audio_poll.unregister(self.audio_fifo)
+             self.audio_poll = None
+             os.close(self.audio_fifo)
+             self.audio_fifo = None
+             print('warning audio error',events[0][1])
+             continue
+
+           while bufsize > 0 and len(events) > 0 and events[0][1] & select.POLLIN:
+             tmp = os.read(self.audio_fifo,bufsize)
+             events = self.audio_poll.poll(1)
+             if tmp is not None:
+               raw_audio += tmp
+               bufsize = int((2 * self.sample / self.fps) - len(raw_audio))
+               if bufsize < 0:
+                 print('warning, negative buf',bufsize)
+             else:
+               fail += 1
+               print("warning audio underrun0",len(raw_audio))
+               time.sleep(0.001)
+             if fail > 5:
+               print("warning audio underrun1",len(raw_audio))
+               break
+           if raw_audio is not None and len(raw_audio) == int(self.sample*2/self.fps):
              data['audio'] = raw_audio
              raw_audio = bytes()
-             #data['audio_np'] = np.frombuffer(data['audio'],np.int16)
+
+         if data is not None and data.get('audio') is not None:
              data['audio_np'] = np.fromstring(data['audio'],np.int16)
              data['audio_level'] = np.std(data['audio_np'])
              longest = 0
@@ -290,86 +335,98 @@ class FileVideoStream:
 ###### video
          if self.image:
            data['raw'] = cv2.resize(cv2.imread(self.stream),(self.width,self.height))
-         elif self.video_fifo and self.video_poll is not None and len(self.video_poll.poll(1)) > 0:
+         elif self.video_fifo and self.video_poll is not None and data.get('raw') is None:
            fail = 0
            bufsize = self.width*self.height*3 - len(raw_image)
+           events = self.video_poll.poll(1)
+           if len(events) > 0 and not events[0][1] & select.POLLIN:
+             self.video_poll.unregister(self.video_fifo)
+             self.video_poll = None
+             os.close(self.video_fifo)
+             self.video_fifo = None
+             print('warning video error',events[0][1])
+             continue
 
-           while bufsize > 0 and self.video_poll is not None and len(self.video_poll.poll(1)) > 0:
+           while bufsize > 0 and len(events) > 0 and events[0][1] & select.POLLIN:
              tmp = os.read(self.video_fifo,bufsize)
+             events = self.video_poll.poll(1)
              if tmp is not None:
                raw_image += tmp
                bufsize = self.width*self.height*3 - len(raw_image)
-               if bufsize < 0:
-                 print('warning, negative buf',bufsize)
              else:
                fail += 1
-               time.sleep(0.01)
+               print("warning video underrun0",len(raw_image))
+               time.sleep(0.001)
              if fail > 5:
-               #print("warning video underrun1",len(raw_image))
+               print("warning video underrun1",len(raw_image))
                break
            if raw_image is not None and len(raw_image) == self.width*self.height*3:
              data['raw'] = np.fromstring(raw_image,dtype='uint8').reshape((self.height,self.width,3))
+             raw_image = bytes()
 
          if data is not None and data.get('raw') is not None:
-           raw_image = bytes()
-           cv2.imwrite('/tmp/tmp.bmp',data['raw'])
-           data['bw'] = cv2.cvtColor(data['raw'], cv2.COLOR_BGR2GRAY)
-           non_empty_columns = np.where(data['bw'].max(axis=0) > 0)[0]
-           non_empty_rows = np.where(data['bw'].max(axis=1) > 0)[0]
            # crop out letter and pillarbox
            #  don't do this if we get a null  - its a scene break
            #  TODO: don't do this unless the height and width is changing by a lot
-           if len(non_empty_rows) > 200 and len(non_empty_columns) > 200 and min(non_empty_columns) > 0:
-             #data['rframe'] = data['raw'][min(non_empty_rows):max(non_empty_rows)+1,min(non_empty_columns):max(non_empty_columns)+1:]
+           start = time.time()
+           data['small'] = cv2.resize(data['raw'],(int(data['raw'].shape[:2][1] * self.scale),int(data['raw'].shape[:2][0] * self.scale)))
+           non_empty_columns = np.int0(np.where(data['small'].max(axis=0) > 0)[0] / self.scale)
+           if len(non_empty_columns) > 100 and min(non_empty_columns) > self.height * 0.05 and max(non_empty_columns) < self.height * 0.95:
              data['rframe'] = data['raw'][0:self.height,min(non_empty_columns):max(non_empty_columns)+1:]
+             data['small'] = cv2.resize(data['rframe'],(int(data['rframe'].shape[:2][1] * self.scale),int(data['rframe'].shape[:2][0] * self.scale)))
            else:
              data['rframe'] = data['raw']
 
            data['height'], data['width'], data['channels'] = data['rframe'].shape
-           data['frame'] = data['rframe']
            data['scale'] = self.scale
-           data['frame_mean'] = np.sum(data['rframe']) / float(data['rframe'].shape[0] * data['rframe'].shape[1] * data['rframe'].shape[2])
-           data['hist'] = cv2.calcHist([data['rframe']], [0, 1, 2], None, [8, 8, 8],[0, 256, 0, 256, 0, 256])
+
+           data['gray'] = cv2.cvtColor(data['small'],cv2.COLOR_BGR2GRAY)
+
+           data['frame_mean'] = np.sum(data['small']) / float(data['small'].shape[0] * data['small'].shape[1] * data['small'].shape[2])
+           data['hist'] = cv2.calcHist([data['small']], [0, 1, 2], None, [8, 8, 8],[0, 256, 0, 256, 0, 256])
            data['hist'] = cv2.normalize(data['hist'],5).flatten()
            hist = data['hist']
            hist = hist.ravel()/hist.sum()
            logs = np.log2(hist+0.00001)
            data['contrast'] = -1 * (hist*logs).sum()
 
-           data['small'] = cv2.resize(data['rframe'],(int(data['rframe'].shape[:2][1] * self.scale),int(data['rframe'].shape[:2][0] * self.scale)))
-           data['gray'] = cv2.cvtColor(data['small'],cv2.COLOR_BGR2GRAY)
-         else:
-           time.sleep(1/self.fps)
-           #raw_image = bytes()
-           #print("warning video underrun2",len(raw_image))
-           continue
-
 
 ###### transcription
          if self.tas and self.tas.transcribe and self.tas.transcribe.stdout:
-           #print('reading3')
            frame_transcribe = self.tas.transcribe.stdout.read(4096)
-           #print('reading4')
            if frame_transcribe is not None:
              data['transcribe'] = frame_transcribe.decode('ascii')
              print("  Transcribe:",len(play_audio),frame_transcribe)
-##
-         self.microclockbase += 1 / self.fps
-         read_frame += 1
-         # drop frames if necessary, only if URL 
-         #if self.stream[:4] == 'rtsp' or self.stream[:4] == 'http') and self.Q.qsize() < 1000:
-         self.Q.put(data)
-         time.sleep(0.01)
 
-     os.close(self.video_fifo)
-     os.close(self.audio_fifo)
+
+         # drop frames if necessary, only if URL 
+         if self.audio_fifo and self.video_fifo:
+           if data.get('audio') is not None and data.get('rframe') is not None:
+             self.microclockbase += 1 / self.fps
+             read_frame += 1
+             self.Q.put_nowait(data)
+         elif self.video_fifo or self.image:
+           if data.get('rframe') is not None:
+             self.microclockbase += 1 / self.fps
+             read_frame += 1
+             self.Q.put_nowait(data)
+      
+         time.sleep(0.0001)
+
+     if self.video_fifo:
+       os.close(self.video_fifo)
+     if self.audio_fifo:
+       os.close(self.audio_fifo)
 
   def read(self):
     return self.Q.get()
 
   def stop(self):
     print('stop!')
-    self.stopped = True
+    self.stopped.value = multiprocessing.Value('i',1)
+    for i in range(self.Q.qsize()):
+      self.Q.get()
+    self.Q = None
 
 #
 # Turn the output from the lavfi filter into a dict with timestamps

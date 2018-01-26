@@ -19,7 +19,7 @@ from utils2 import log as log
 
 import streams.read
 # Load up the sources 
-sources = [line.rstrip('\n') for line in open('/home/kristopher/tf_files/scripts/sources.txt')]
+sources = [line.rstrip('\n') for line in open('sources.txt')]
 
 # 3.4.0
 import cv2
@@ -30,33 +30,40 @@ image_np = cv2.imread("/home/kristopher/tf_files/scripts/test.jpg")
 image_np_expanded = np.expand_dims(image_np, axis=0)
 
 import models.face
-faces = models.face.nnFace().load()
-faces.test(image_np)
+faces = None
+#faces = models.face.nnFace().load()
+#faces.test(image_np)
 
 import models.im2txt
-im2txt = models.im2txt.nnIm2txt().load()
-im2txt.test(image_np)
+im2txt = None
+#im2txt = models.im2txt.nnIm2txt().load()
+#im2txt.test(image_np)
 
 import models.text
-text = models.text.nnText().load()
-text.test(image_np)
+text = None
+#text = models.text.nnText().load()
+#text.test(image_np)
 
 import models.ssd
-ssd = models.ssd.nnSSD().load()
-ssd.test(image_np_expanded)
+ssd = None
+#ssd = models.ssd.nnSSD().load()
+#ssd.test(image_np_expanded)
 
 import models.vehicle
-vehicles = models.vehicle.nnVehicle().load()
-vehicles.test(image_np_expanded)
+vehicle = None
+#vehicle = models.vehicle.nnVehicle().load()
+#vehicle.test(image_np_expanded)
 
 import models.objects
 # disabled because slow
+objects = None
 #objects = models.objects.nnObject().load()
 #objects.test(image_np_expanded)
 
 import models.contrib.deepad
-logos = models.contrib.deepad.nnLogo().load()
-logos.test(image_np_expanded)
+logo = None
+#logos = models.contrib.deepad.nnLogo().load()
+#logos.test(image_np_expanded)
 
 
 # and playing with fifo buffers
@@ -103,18 +110,17 @@ face_tracker = cv2.MultiTracker_create()
 kitti_tracker = cv2.MultiTracker_create()
 
 import streams.cast
-cvs = streams.cast.CastVideoStream().load(WIDTH,HEIGHT)
+cvs = None
+#cvs = streams.cast.CastVideoStream().load(WIDTH,HEIGHT)
 
 import detectors.shot
 
 all_stuff = []
-for item in ssd.ccategory_index:
-  all_stuff.append(ssd.ccategory_index[item]['name'])
+if ssd is not None:
+  for item in ssd.ccategory_index:
+    all_stuff.append(ssd.ccategory_index[item]['name'])
 
-start = time.time()
-# Load up the sources 
-sources = [line.rstrip('\n') for line in open('/home/kristopher/tf_files/scripts/sources.txt')]
-
+bstart = time.time()
  
 if 1==1:
   if 1==1:
@@ -124,6 +130,8 @@ if 1==1:
       for source in sources:
         fvs = streams.read.FileVideoStream(source).load(WIDTH,HEIGHT,FPS,SAMPLE)
         print('source: %s' % source)
+        print('stopped',fvs.stopped)
+        time.sleep(5)
 
         last_frame = None
 
@@ -175,12 +183,15 @@ if 1==1:
         shot_textprint = '0b'
         shot_audioprint = '0b'
 
-        while fvs.stopped is False:
+        while fvs.stopped.value == 0:
           if fvs.Q.qsize() < 1:
+            if fvs.t and fvs.t.is_alive() is False:
+              print('done')
+              break
             time.sleep(0.1)
             continue
 
-          frametime = datetime.datetime.utcnow().utcfromtimestamp(frame / FPS).strftime('%H:%M:%S')
+          frametime = datetime.datetime.utcnow().utcfromtimestamp(frame / fvs.fps).strftime('%H:%M:%S')
           filetime = datetime.datetime.utcnow().utcfromtimestamp(fvs.microclockbase + fvs.clockbase).strftime('%H:%M:%S')
           local_fps = fps_frame / (time.time() - start_time)
           if caption_end == frametime:
@@ -202,6 +213,7 @@ if 1==1:
           data['original'] = data['rframe'].copy()
           data['show'] = data['rframe'].copy()
           data['frame'] = frame
+          data['frametime'] = datetime.datetime.utcnow().utcfromtimestamp(frame / fvs.fps).strftime('%H:%M:%S,%f')[:-3]
 
           data['com_detect'] = 'Segment'
           if last_frame and last_frame.get('com_detect') and last_frame.get('shot_detect') != last_frame.get('frame'):
@@ -216,7 +228,9 @@ if 1==1:
           data['text_hulls'] = []
           if last_frame and last_frame['text_hulls']:
             data['text_hulls'] = last_frame['text_hulls']
-
+          if data['frame'] % 1000 == 0 and data['frame'] > 1:
+           print('\t\t',data['frametime'],' ',data['frame'],'%.2f' % (data['frame'] / (time.time() - bstart)))
+          
           if data.get('transcribe'):
             last_transcribe = frame
 
@@ -320,7 +334,7 @@ if 1==1:
 # 
 #  (also, this part enqueues the audio to play)
 # 
-          if fvs.Q.qsize() > 40 and frame % 30 == 0:
+          if fvs.display and fvs.Q.qsize() > 40 and frame % 30 == 0:
             play_audio = bytearray()
             for i in range(10,40):
               if fvs.Q.queue[i].get('audio'):
@@ -334,13 +348,12 @@ if 1==1:
 #  Text is the highest indicator of advertising. Detects individual letters
 #  Runs a neural network underneath
 # 
-          if (frame == data.get('shot_detect')+1 or frame == data.get('shot_detect')+7 or frame == data.get('shot_detect') + 37) or fvs.image:
+          if text is not None and ((frame == data.get('shot_detect')+1 or frame == data.get('shot_detect')+7 or frame == data.get('shot_detect') + 37) or fvs.image):
             old_text_rects = []
             if last_frame and last_frame.get('text_rects'):
               old_text_rects = last_frame.get('text_rects')
             start = time.time()
-            if True:
-              print('checking for text')
+            if text is not None:
               data['text_hulls'] = text.test(data['rframe'])
               if len(data['text_hulls']) > 0:
                 for box in data['text_hulls']:
@@ -391,7 +404,7 @@ if 1==1:
 #  doesn't have to be all the time
 # mobilenet, then dlib if we see people
 #
-          if ssd.sess is not None and (data.get('shot_detect') and (frame == data.get('shot_detect') + 3 or fvs.image or (frame <= motion_start + 4 and frame % 5 == 0)) or frame % 31 == 0):
+          if ssd is not None and ssd.sess is not None and (data.get('shot_detect') and (frame == data.get('shot_detect') + 3 or fvs.image or (frame <= motion_start + 4 and frame % 5 == 0)) or frame % 31 == 0):
             ssd_frame = frame
 
             #  It doesn't really make sense to run this
@@ -562,9 +575,10 @@ if 1==1:
                 include_labels.extend(['%ss' % curr])
 
             exclude_labels.extend(list(set(all_stuff) - set(include_labels)))
-
-            data['shot_summary'] = im2txt.run(data['rframe'].copy(),include_labels,exclude_labels)
-            prev_scene['shot_summary'] += data['shot_summary'] + ' '
+         
+            if im2txt:
+              data['shot_summary'] = im2txt.run(data['rframe'].copy(),include_labels,exclude_labels)
+              prev_scene['shot_summary'] += data['shot_summary'] + ' '
 
 
 ###########
@@ -706,8 +720,6 @@ if 1==1:
               label = "%s: %d" % (rect[2],int(rect[1]*100))
               text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 1)[0]
               cv2.rectangle(data['show'], (rect[0][0], rect[0][1]+text_size[1]+10), (rect[0][0]+text_size[0]+10, rect[0][1]), (255,0,0), cv2.FILLED)
-              if frame < rect[3] + FPS/2:
-                cv2.rectangle(data['show'], (rect[0][0], rect[0][1]), (rect[0][2],rect[0][3]), (255, 0, 0), 1)
               cv2.putText(data['show'], label ,(rect[0][0]+5, rect[0][1]+text_size[1]+5),cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 
           if len(ssd_rects) > 0:
@@ -816,8 +828,6 @@ if 1==1:
 
               if written is False:
                 text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 1)[0]
-                if frame < rect[3] + FPS/2 and face_hulls[i] is not None:
-                  cv2.polylines(data['show'], face_hulls[i], False, (0, 255, 0), 1)
                 cv2.rectangle(data['show'], (rect[0], rect[3]+text_size[1]+10), (rect[0]+text_size[0]+10, rect[3]), (0,255,0), cv2.FILLED)
                 cv2.putText(data['show'],label,(rect[0]+5,rect[3]+text_size[1]+5),cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
               i += 1
@@ -887,6 +897,7 @@ if 1==1:
           else:
             shot_voiceprint += '0'
 
+          # never put last_frame in data
           last_frame = data.copy()
 # 
 #  Letterbox and pillarbox the image before displaying it
@@ -912,9 +923,11 @@ if 1==1:
               tmp = 30
             waitkey += tmp
 
-          cv2.imshow('Object Detection',cast_frame)
-          #cv2.imwrite('/tmp/demo/frame.%05d.bmp' % frame,cast_frame)
+          #cv2.imwrite('/tmp/demo_5/frame.%05d.bmp' % frame,cast_frame)
+          if fvs.display is False:
+            continue
 
+          cv2.imshow('Object Detection',cast_frame)
           if fvs.image:
              # an hour?
              waitkey = 60*60*1000

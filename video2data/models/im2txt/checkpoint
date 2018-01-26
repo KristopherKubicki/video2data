@@ -1,6 +1,1 @@
-model_checkpoint_path: "/home/kristopher/models/research/im2txt/im2txt/model//train/model.ckpt-1311071"
-all_model_checkpoint_paths: "/home/kristopher/models/research/im2txt/im2txt/model//train/model.ckpt-1301194"
-all_model_checkpoint_paths: "/home/kristopher/models/research/im2txt/im2txt/model//train/model.ckpt-1303707"
-all_model_checkpoint_paths: "/home/kristopher/models/research/im2txt/im2txt/model//train/model.ckpt-1306220"
-all_model_checkpoint_paths: "/home/kristopher/models/research/im2txt/im2txt/model//train/model.ckpt-1308705"
-all_model_checkpoint_paths: "/home/kristopher/models/research/im2txt/im2txt/model//train/model.ckpt-1311071"
+model_checkpoint_path: "/home/kristopher/tf_files/scripts/video2data/video2data/models/im2txt/model.ckpt-1311071"
