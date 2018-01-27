@@ -192,11 +192,11 @@ class FileVideoStream:
 
   def __del__(self):
     # I need to figure out how to get it to reset the console too
-    if os.path.exists('/tmp/%s_video' % self.name):
+    if self.video_fifo and os.path.exists('/tmp/%s_video' % self.name):
       os.unlink('/tmp/%s_video' % self.name)
-    if os.path.exists('/tmp/%s_audio' % self.name):
+    if self.audio_fifo and os.path.exists('/tmp/%s_audio' % self.name):
       os.unlink('/tmp/%s_audio' % self.name)
-    if os.path.exists('/tmp/%s_caption' % self.name):
+    if self.caption_fifo and os.path.exists('/tmp/%s_caption' % self.name):
       os.unlink('/tmp/%s_caption' % self.name)
     if self.video_fifo:
       os.close(self.video_fifo)
@@ -214,14 +214,12 @@ class FileVideoStream:
       self.pipe.terminate()
       self.pipe.kill()
 
-# Thread here
   def load(self,width,height,fps,sample,scale=0.2):
     self.scale = scale
     self.width = width
     self.height = height
     self.fps = fps
     self.sample = sample
-    #self.t = threading.Thread(target=self.update, args=())
     self.t = multiprocessing.Process(target=self.update, args=())
     self.t.daemon = True
     self.t.start()
@@ -257,6 +255,8 @@ class FileVideoStream:
 
        if True:
          rstart = time.time()
+
+# TODO: get this into utils/var
          data = {}
          data['speech_level'] = 0.0
          data['fps'] = self.fps

@@ -131,5 +131,6 @@ Special thanks to all the people who inspired and helped me build this applicati
   <li><a href='http://blueprintalpha.com/'>Blueprint Alpha</a></li>
   <li><a href='https://soundcloud.com/hoodinternet'>The Hood Internet</a></li>
   <li>#hassbro</li>
+  <li><a href='https://www.youtube.com/channel/UCWN3xxRkmTPmbKwht9FuE5A'>Siraj Raval</a></li>
  </ul>
 

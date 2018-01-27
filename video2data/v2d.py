@@ -16,6 +16,7 @@ from utils2 import image as v2dimage
 from utils2 import sig as v2dsig
 from utils2 import realtime as realtime
 from utils2 import log as log
+from utils2 import var as v2dvar
 
 import streams.read
 # Load up the sources 
@@ -115,7 +116,7 @@ if ssd is not None:
     all_stuff.append(ssd.ccategory_index[item]['name'])
 
 bstart = time.time()
- 
+  
 if 1==1:
   if 1==1:
 
@@ -128,15 +129,10 @@ if 1==1:
         fvs = streams.read.FileVideoStream(source).load(WIDTH,HEIGHT,FPS,SAMPLE)
         print('source: %s' % source)
         print('stopped',fvs.stopped)
-        time.sleep(5)
 
         last_frame = None
-
-        prev_scene = {}
-        prev_scene['type'] = 'Segment'
-        prev_scene['length'] = 0
-        prev_scene['caption'] = None
-        prev_scene['scene_shotprint'] = '0b'
+        prev_scene = v2dvar.new_scene(0)
+        prev_shot = v2dvar.new_shot(0)
 
         frame_caption = ''
         caption_end = ''
@@ -166,19 +162,12 @@ if 1==1:
         face_hulls = []
         motion_hulls = []
         motion_cnts = []
-        shot_faces = []
 
         logo_frame = 0
         oi_frame = 0
         ssd_frame = 0
         kitti_frame = 0
         face_frame = 0
-
-        shot_faceprint = '0b'
-        shot_voiceprint = '0b'
-        shot_videoprint = '0b'
-        shot_textprint = '0b'
-        shot_audioprint = '0b'
 
         while fvs.stopped.value == 0:
           if fvs.Q.qsize() < 1:
@@ -215,15 +204,16 @@ if 1==1:
           waitkey = realtime.smoothWait(fvs)
           fvs.ff = False
 
-          data = fvs.read()
           data['original'] = data['rframe'].copy()
           data['show'] = data['rframe'].copy()
           data['frame'] = frame
           data['frametime'] = datetime.datetime.utcnow().utcfromtimestamp(frame / fvs.fps).strftime('%H:%M:%S,%f')[:-3]
 
-          data['com_detect'] = 'Segment'
-          if last_frame and last_frame.get('com_detect') and last_frame.get('shot_detect') != last_frame.get('frame'):
-            data['com_detect'] = last_frame['com_detect']
+# TODO:
+#  move to DA contrib 
+#          prev_scene['com_detect'] = 'Segment'
+#          if last_frame and last_frame.get('com_detect') and last_frame.get('shot_detect') != last_frame.get('frame'):
+#            data['com_detect'] = last_frame['com_detect']
 
           data['ssd_rects'] = []
           data['human_rects'] = []
@@ -240,16 +230,16 @@ if 1==1:
           if data.get('transcribe'):
             last_transcribe = frame
 
-          frame += 1
+          data = detectors.shot.frame_to_contours(data,last_frame)
+          data = detectors.shot.frame_to_shots(data,last_frame)
+          if data.get('shot_detect') == frame and last_frame is not None:
+            prev_shot['end'] = frame-1
+            prev_shot['shottime'] = datetime.datetime.utcnow().utcfromtimestamp((data['frame'] - prev_shot['start']) / data['fps']).strftime('%H:%M:%S')
+            log.shot_recap(prev_shot)
+
           if frame % 60 == 0:
             start_time = time.time()
             fps_frame = 0
-          fps_frame += 1   
- 
-          data = detectors.shot.frame_to_contours(data,last_frame)
-          data = detectors.shot.frame_to_shots(data,last_frame)
-          if data.get('shot_detect') == frame:
-            log.shot_recap(data)
 
 #  SCENE BREAK DETECTOR
 #
@@ -260,20 +250,20 @@ if 1==1:
             data['scene_detect'] = frame
             # TODO: make this based on break_count instead
             if (frame - last_frame['scene_detect']) / FPS > 1:
-              prev_scene['scenetime'] = datetime.datetime.utcnow().utcfromtimestamp((last_frame['scene_detect'] + data['break_count']) / FPS).strftime('%H:%M:%S')
+              prev_scene['end'] = frame-1
+              prev_scene['break_type'] = data['frame_type']
+              prev_scene['scenetime'] = datetime.datetime.utcnow().utcfromtimestamp((prev_scene['end'] - prev_scene['start']) / FPS).strftime('%H:%M:%S')
               prev_scene['length'] = float((frame - last_frame['scene_detect'] + data['break_count']) / FPS)
-              if data['com_detect'] != 'Programming' and int(prev_scene['length']) in [10,15,30,45,60]:
-                data['com_detect'] = 'Commercial'
-              prev_scene['type'] = data['com_detect']
-              prev_scene['detect'] = data['frame_type']
+
+              # TODO move to DA contrib
+#              if data['com_detect'] != 'Programming' and int(prev_scene['length']) in [10,15,30,45,60]:
+#                data['com_detect'] = 'Commercial'
+#              prev_scene['type'] = data['com_detect']
+
 
               log.scene_recap(prev_scene)
-
-              prev_scene = {}
-              prev_scene['type'] = 'Segment'
-              prev_scene['length'] = 0
-              prev_scene['caption'] = None
-              prev_scene['scene_shotprint'] = '0b'
+              prev_scene = v2dvar.new_scene(frame)
+              prev_shot = v2dvar.new_shot(frame)
 
               caption_end = ''
               frame_caption = ''
@@ -287,19 +277,19 @@ if 1==1:
 # if we detect this is a new shot, then all of the detection needs to be redone
           #print("output_0",time.time() - start)
           if data.get('shot_detect') == frame:
-            prev_scene['scene_text'].extend(data['text_hulls'])
+            prev_scene['text'].extend(data['text_hulls'])
             for rect in oi_rects:
               if rect[1] > 0.8:
-                prev_scene['scene_stuff'].append(rect[2])
+                prev_scene['stuff'].append(rect[2])
             for rect in ssd_rects:
               if rect[1] > 0.8:
-                prev_scene['scene_stuff'].append(rect[2])
+                prev_scene['stuff'].append(rect[2])
             for rect in kitti_rects:
               if rect[1] > 0.7:
-                prev_scene['scene_vehicles'].append(rect[2])
+                prev_scene['vehicles'].append(rect[2])
             for rect in kitti_rects:
               if rect[1] > 0.8:
-                prev_scene['scene_vehicles'].append(rect[2])
+                prev_scene['vehicles'].append(rect[2])
             # reset all the OCR if we change shot
             for pipe in tmp_pipes:
               pipe[0].close()
@@ -310,7 +300,6 @@ if 1==1:
             oi_rects = []
             kitti_rects = []
             logo_rects = []
-            shot_faces = []
             motion_cnts = []
             motion_hull = []
             data['text_hulls'] = []
@@ -320,15 +309,10 @@ if 1==1:
             logo_tracker = None
             face_tracker = None
 
-            shot_audioprint = '0b'
-            shot_textprint = '0b'
-            shot_voiceprint = '0b'
-            shot_videoprint = '0b'
-            shot_faceprint = '0b'
-            prev_scene['scene_shotprint'] += '1'
+            prev_scene['shotprint'] += '1'
             #print("shot detect!",frame,shot_detect,motion_detect,subtle_detect)
           else:
-            prev_scene['scene_shotprint'] += '0'
+            prev_scene['shotprint'] += '0'
 
 
 ################
@@ -572,8 +556,8 @@ if 1==1:
             exclude_labels.extend(list(set(all_stuff) - set(include_labels)))
          
             if im2txt:
-              data['shot_summary'] = im2txt.run(data['rframe'].copy(),include_labels,exclude_labels)
-              prev_scene['shot_summary'] += data['shot_summary'] + ' '
+              prev_shot['summary'] = im2txt.run(data['rframe'].copy(),include_labels,exclude_labels)
+              prev_scene['summary'] += prev_shot['summary'] + ' '
 
 
 ###########
@@ -867,30 +851,32 @@ if 1==1:
                 text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
                 cv2.rectangle(data['show'], (rect[0][0],rect[0][1]),(rect[0][0]+text_size[0]+10,rect[0][1]+text_size[1]+10), (0,0,0), cv2.FILLED)
                 cv2.putText(data['show'], label ,(rect[0][0]+5, rect[0][1]+text_size[1]+5),cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
-            shot_textprint += '1'
+            prev_shot['textprint'] += '1'
           else:
-            shot_textprint += '0'
+            prev_shot['textprint'] += '0'
 
           if len(motion_hulls) > 0:
-            shot_videoprint += '1'
+            prev_shot['videoprint'] += '1'
           else:
-            shot_videoprint += '0'
+            prev_shot['videoprint'] += '0'
 
           if data and data.get('audio') is not None:
             # TODO:  check the audio level based on a few thing
             # this seems to be the halfway mark on my computer
             if data['audio_level'] >= 500:
-              shot_audioprint += '1'
+              prev_shot['audioprint'] += '1'
             else:
-              shot_audioprint += '0'
+              prev_shot['audioprint'] += '0'
 
             # get peaks and valleys, create hash based on them (wavelets)
-
 # voiceprint
           if data and data.get('speech_level') > 0.6:
-            shot_voiceprint += '1'
+            prev_shot['voiceprint'] += '1'
           else:
-            shot_voiceprint += '0'
+            prev_shot['voiceprint'] += '0'
+
+          fps_frame += 1   
+          frame += 1
 
           # never put last_frame in data
           last_frame = data.copy()

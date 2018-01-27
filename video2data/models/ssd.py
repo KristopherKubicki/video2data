@@ -104,8 +104,7 @@ class nnSSD:
             face_descriptor = faces.facerec.compute_face_descriptor(tmp, shape)
             all_faces.append(face_descriptor)
             labels = dlib.chinese_whispers_clustering(all_faces, 0.5)
-            prev_scene['scene_faces'].append(base64.b64encode(np.squeeze(labels[-1])).decode('utf-8')[:-2])
-            shot_faces.append(base64.b64encode(np.squeeze(labels[-1])).decode('utf-8')[:-2])
+            frame['faces'].append(base64.b64encode(np.squeeze(labels[-1])).decode('utf-8')[:-2])
             detected_label = 'CELEB: ' + base64.b64encode(np.squeeze(labels[-1])).decode('utf-8')[:-2]
             cscore += 0.5
             break
