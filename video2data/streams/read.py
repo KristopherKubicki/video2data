@@ -191,21 +191,6 @@ class FileVideoStream:
     self.Q = multiprocessing.Queue(maxsize=queueSize)
 
   def __del__(self):
-    # I need to figure out how to get it to reset the console too
-    if self.video_fifo and os.path.exists('/tmp/%s_video' % self.name):
-      os.unlink('/tmp/%s_video' % self.name)
-    if self.audio_fifo and os.path.exists('/tmp/%s_audio' % self.name):
-      os.unlink('/tmp/%s_audio' % self.name)
-    if self.caption_fifo and os.path.exists('/tmp/%s_caption' % self.name):
-      os.unlink('/tmp/%s_caption' % self.name)
-    if self.video_fifo:
-      os.close(self.video_fifo)
-    if self.audio_fifo:
-      os.close(self.audio_fifo)
-    if self.caption_fifo:
-      os.close(self.audio_fifo)
-      #self.caption_fifo.flush()
-      #self.caption_fifo.close()
     if self.pipe:
       # not cleanly exiting the threads leads to all kinds of problems, including deadlocks
       outs, errs = self.pipe.communicate(timeout=15)
@@ -213,6 +198,21 @@ class FileVideoStream:
       self.pipe.wait()
       self.pipe.terminate()
       self.pipe.kill()
+
+    if self.video_fifo:
+      os.close(self.video_fifo)
+    if self.audio_fifo:
+      os.close(self.audio_fifo)
+    if self.caption_fifo:
+      os.close(self.audio_fifo)
+
+    # I need to figure out how to get it to reset the console too
+    if self.video_fifo and os.path.exists('/tmp/%s_video' % self.name):
+      os.unlink('/tmp/%s_video' % self.name)
+    if self.audio_fifo and os.path.exists('/tmp/%s_audio' % self.name):
+      os.unlink('/tmp/%s_audio' % self.name)
+    if self.caption_fifo and os.path.exists('/tmp/%s_caption' % self.name):
+      os.unlink('/tmp/%s_caption' % self.name)
 
   def load(self,width,height,fps,sample,scale=0.2):
     self.scale = scale
