@@ -505,13 +505,13 @@ class FileVideoStream:
              real_break = new_buf[0]['shot_detect']
              # pick the oldest frame in a tie
              if len(scenes) > 0:
-               scenes.sort(key=lambda x: x[1],reverse=True)
                scenes.sort(key=lambda x: x[0],reverse=True)
+               scenes.sort(key=lambda x: x[1],reverse=True)
                print('upcoming scenes',scenes)
                real_break = scenes[0][0]
              elif len(breaks) > 0:
-               breaks.sort(key=lambda x: x[1],reverse=True)
                breaks.sort(key=lambda x: x[0],reverse=True)
+               breaks.sort(key=lambda x: x[1],reverse=True)
                print('upcoming breaks',breaks)
                real_break = breaks[0][0]
 

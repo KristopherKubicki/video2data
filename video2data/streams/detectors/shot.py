@@ -77,11 +77,11 @@ def frame_to_shots(frame,last_frame):
     print('VID SCENE',frame['frametime'],frame['frame'],'\t',frame['break_type'])
     frame['scene_detect'] = frame['frame']
     frame['sbd'] *= 1.5
-  elif frame['shot_type'] and frame['audio_detect'] > frame['shot_detect'] - 3:
+  elif frame['shot_type'] and frame['audio_detect'] > frame['shot_detect'] - 4:
     print('WA SCENE',frame['frametime'],frame['frame'],'\t',frame['break_type'])
     frame['scene_detect'] = frame['frame']
     frame['sbd'] *= 1.2
-  elif frame['audio_type'] and frame['shot_detect'] > frame['audio_detect'] - 3:
+  elif frame['audio_type'] and frame['shot_detect'] > frame['audio_detect'] - 4:
     print('WV SCENE',frame['frametime'],frame['frame'],'\t',frame['break_type'])
     frame['scene_detect'] = frame['frame']
     frame['sbd'] *= 1.2
@@ -216,6 +216,8 @@ def audio_shot_detector(frame,last_frame):
   # TODO: implement ffmpeg loudnorm, otherwise these volume levels are arbitrary
 
   if frame['audio_level'] == 0:
+    if frame['zcr'] == 0:
+      print('warning! audio defect')
     if len(frame['edges']) == 0:
       frame['audio_type'] = 'HARD'
       frame['audio_detect'] = frame['frame']
@@ -225,7 +227,7 @@ def audio_shot_detector(frame,last_frame):
   elif frame['audio_level'] < 1 and frame['zcr'] > 20:
     frame['audio_type'] = 'ZCR'
     frame['audio_detect'] = frame['frame']
-  elif frame['audio_level'] < 20 and frame['abd'] > 0.01:
+  elif frame['audio_level'] < 20 and frame['abd'] > 0.01 and frame['speech_level'] < 0.5:
     frame['audio_type'] = 'PEAK'
     frame['audio_detect'] = frame['frame']
   elif frame['audio_level'] < 1 and frame['silence'] > 10:

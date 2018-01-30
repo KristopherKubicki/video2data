@@ -255,16 +255,19 @@ if 1==1:
             last_transcribe = frame
 
 
-          if last_frame is not None and prev_shot.get('last_frame') is None and 'Blank' not in last_frame['shot_type']:
+          if last_frame and 'BLANK' not in last_frame['shot_type'] and last_frame['frame'] < last_frame['shot_detect'] - 2:
             prev_shot['last_frame'] = last_frame['small']
-          if last_frame is not None and data['shot_detect'] == data['frame'] + 5:
-            prev_shot['closing'] = last_frame['small']
+            prev_scene['closing'] = prev_shot['last_frame']
+            prev_shot['closing'] = prev_shot['last_frame']
 
           if data.get('shot_detect') == frame and last_frame is not None and prev_shot.get('last_frame') is not None:
+            print("DETECTING!!!")
+            cv2.imshow('closing2',prev_shot['closing'])
             if prev_shot['closing'] is None:
               prev_shot['closing'] = last_frame['small']
             if prev_scene['opening'] is None:
               prev_scene['opening'] = prev_shot['closing']
+
             prev_shot['end'] = frame-1
             prev_shot['break_type'] = data['break_type']
             prev_shot['shottime'] = datetime.datetime.utcnow().utcfromtimestamp((prev_shot['start']) / data['fps']).strftime('%H:%M:%S,%f')[:-3]
