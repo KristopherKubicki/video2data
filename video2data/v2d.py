@@ -118,6 +118,16 @@ if ssd is not None:
     all_stuff.append(ssd.ccategory_index[item]['name'])
 
 bstart = time.time()
+
+def setLabel(im, label, y):
+  fontface = cv2.FONT_HERSHEY_SIMPLEX
+  scale = 0.6
+  thickness = 1
+
+  text_size = cv2.getTextSize(label, fontface, scale, thickness)[0]
+  cv2.rectangle(im, (10, y - text_size[1] - 5), (10 + text_size[0], y + 5), (0,0,0), cv2.FILLED)
+  cv2.putText(im, label ,(10, y),fontface, scale, (0, 255, 0), thickness)
+
   
 if 1==1:
   if 1==1:
@@ -261,6 +271,7 @@ if 1==1:
             prev_shot['length'] = float((prev_shot['end'] - prev_shot['start']) / FPS)
             log.shot_recap(prev_shot)
             cv2.imshow('cur_frame',data['small'])
+            #data['show'][y:data['height']+y,x:data['width']+x:] = data['small'].copy()
             cv2.imshow('last_frame',prev_shot['last_frame'])
 
 
@@ -932,6 +943,17 @@ if 1==1:
 
           # never put last_frame in data
           last_frame = data.copy()
+
+          setLabel(data['show'], "FBUF: %d (%dms)" % (fvs.Q.qsize(),waitkey),115)
+          setLabel(data['show'], "FRAM: %d (%.3ffps)" % (data['frame'],fps_frame / (time.time() - start_time)),135)
+          setLabel(data['show'], "REAL: %s" % filetime,155)
+          setLabel(data['show'], "VIEW: %s" % frametime,175)
+          setLabel(data['show'], "SBD: %.2f" % data['sbd'],195)
+          if data['shot_detect'] > data['frame']:
+            setLabel(data['show'], "NEXT: %d" % (int(data['shot_detect']) - int(data['frame'])),215)
+          if data['scene_detect'] > data['frame']:
+            setLabel(data['show'], "SCENE: %d" % (int(data['shot_detect']) - int(data['frame'])),235)
+# 
 # 
 #  Letterbox and pillarbox the image before displaying it
 #   Probably not everyone wants this
@@ -945,7 +967,6 @@ if 1==1:
             cvs.cast(cast_frame)
             if time.time() - tstart > 0.1:
               print("warn slow writing",time.time() - tstart)
-
 # 
 # TODO
 # Pause a little longer between frames if we are going faster than
@@ -979,7 +1000,8 @@ if 1==1:
             continue
           elif ' ' == chr(key & 255):
               cv2.destroyWindow('Object Detection')
-              r = cv2.selectROI('Select Station Logo',data['original'],False,False)
+              #r = cv2.selectROI('Select Station Logo',data['original'],False,False)
+              r = cv2.selectROI('Select Station Logo',cast_frame,False,False)
               if r[0] > 0 and r[3] > 0:
                 folder = datetime.datetime.utcnow().strftime('%Y%m%d')
                 filename = "%s.jpg" % datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')

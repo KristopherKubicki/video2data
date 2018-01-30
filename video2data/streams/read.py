@@ -309,7 +309,7 @@ class FileVideoStream:
          print('running fast, sleeping')
        if self.Q.qsize() >= 100:
          time.sleep(0.01)
-       if self.Q.qsize() >= 200:
+       if self.Q.qsize() >= self.fps*3:
          time.sleep(0.1)
          continue
          
@@ -489,19 +489,29 @@ class FileVideoStream:
              #  and take the strongest one
              new_buf = []
              breaks = []
+             scenes = []
              data_buf.append(data)
              for buf in data_buf:
                if last_buf is not None and buf['sbd'] == 0.0:
                  buf = shot.frame_to_contours(buf,last_buf)
                  buf = shot.frame_to_shots(buf,last_buf)
+               if buf['scene_detect'] == buf['frame']:
+                 scenes.append((buf['frame'],buf['sbd']))
                if buf['shot_detect'] == buf['frame']:
                  breaks.append((buf['frame'],buf['sbd']))
                last_buf = buf
                new_buf.append(buf)
 
              real_break = new_buf[0]['shot_detect']
-             if len(breaks) > 0:
+             # pick the oldest frame in a tie
+             if len(scenes) > 0:
+               scenes.sort(key=lambda x: x[1],reverse=True)
+               scenes.sort(key=lambda x: x[0],reverse=True)
+               print('upcoming scenes',scenes)
+               real_break = scenes[0][0]
+             elif len(breaks) > 0:
                breaks.sort(key=lambda x: x[1],reverse=True)
+               breaks.sort(key=lambda x: x[0],reverse=True)
                print('upcoming breaks',breaks)
                real_break = breaks[0][0]
 
