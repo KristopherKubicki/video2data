@@ -17,6 +17,53 @@ import numpy as np
 import re
 import select
 
+from streams.detectors import shot
+
+# TODO:
+#  structure this more intelligently
+def new_frame(frame_num=0):
+  frame = {}
+  frame['frame'] = frame_num
+  # TODO: initialize this properly
+  frame['frametime'] = ''
+
+  # TODO: initialize these properly
+  #frame['small'] = bytes()
+  #frame['gray'] = bytes()
+  #frame['rframe'] = bytes()
+
+  # dictates what kind of shot boundary detected
+  frame['shot_type'] = ''
+  # edge contours, good for rough estimations
+  frame['edges'] = []
+  # proprietary metric 
+  frame['gray_motion_mean'] = 0
+  # another video break metric
+  frame['mse'] = 0
+  # shot break detection score
+  frame['sbd'] = 0.0
+  # hulls from motion
+  frame['motion_hulls'] = []
+
+  # last shot detected, could be itself
+  frame['shot_detect'] = 0
+  # last motion frame detected, could be itself
+  frame['motion_detect'] = 0
+  # last audio break detected, could be itself
+  frame['audio_detect'] = 0
+  # last scene break detected, could be itself
+  frame['scene_detect'] = 0
+  # type of audio detected
+  frame['audio_type'] = ''
+  # how long has this frame been breaking?
+  frame['break_count'] = 0
+  # zeros in the audio frame - a measure of artificial silence
+  frame['silence'] = 0
+
+  # how much speech is in the frame
+  frame['speech_level'] = 0.0
+  return frame
+
 #
 # given a segment of audio, determine its energy
 #  check if that energy is in the human band of 
@@ -237,7 +284,8 @@ class FileVideoStream:
      start_talking = 0
      no_talking = 0
 
-     data_buff = []
+     data_buf = []
+     last_buf = None
 
      play_audio = bytearray()
      raw_audio = bytes()
@@ -245,9 +293,12 @@ class FileVideoStream:
 
      while self.stopped.value == 0:
        bstart = time.time() 
-       if self.Q.qsize() >= 1024:
+
+       # TODO: replace with qmax for both
+       if self.Q.qsize() == 1023:
          print('running fast, sleeping')
-         time.sleep(0.1)
+       if self.Q.qsize() >= 1024:
+         time.sleep(0.01)
          
        if self.audio_poll is None and self.video_poll is None and self.image is False:
          print('done')
@@ -257,8 +308,7 @@ class FileVideoStream:
          rstart = time.time()
 
 # TODO: get this into utils/var
-         data = {}
-         data['speech_level'] = 0.0
+         data = new_frame(read_frame)
          data['fps'] = self.fps
 
 ###### captions
@@ -387,7 +437,9 @@ class FileVideoStream:
            data['scale'] = self.scale
 
            data['gray'] = cv2.cvtColor(data['small'],cv2.COLOR_BGR2GRAY)
+           data['hsv'] = cv2.cvtColor(data['small'],cv2.COLOR_BGR2HSV)
 
+           data['lum'] = np.sum(data['hsv']) / float(data['hsv'].shape[0] * data['hsv'].shape[1] * data['hsv'].shape[2])
            data['frame_mean'] = np.sum(data['small']) / float(data['small'].shape[0] * data['small'].shape[1] * data['small'].shape[2])
            data['hist'] = cv2.calcHist([data['small']], [0, 1, 2], None, [8, 8, 8],[0, 256, 0, 256, 0, 256])
            data['hist'] = cv2.normalize(data['hist'],5).flatten()
@@ -409,20 +461,46 @@ class FileVideoStream:
          if self.audio_fifo and self.video_fifo:
            if data.get('audio') is not None and data.get('rframe') is not None:
              self.microclockbase += 1 / self.fps
+             # instead of directly playing the video, buffer it a little
              # buffer this for 30 frames and send them all at the same time
              #  this way we can stitch the audio together 
-             if read_frame % self.fps == 0:
-               play_audio = bytes()
-               for buf in data_buff:
+             window = self.fps
+             if read_frame % (2*window) == 0 and read_frame > 0:
+               cast_audio = bytes()
+               for buf in data_buf[0:2*window]:
+                 cast_audio += buf['audio']
+               data_buf[0]['play_audio'] = cast_audio
+
+               # TODO: if no audio, pad with zero bytes
+               # TODO: peek ahead, find blank frames, break candidates
+               #  TODO: move last_buf to previous buf block
+
+               # this is basically a NMS algorithm.  Find all the upcoming breaks
+               #  and take the strongest one
+               new_buf = []
+               breaks = []
+               data_buf.append(data)
+               for buf in data_buf:
+                 if last_buf is not None and buf['sbd'] == 0.0:
+                   buf = shot.frame_to_contours(buf,last_buf)
+                   buf = shot.frame_to_shots(buf,last_buf)
+                 if buf['shot_detect'] == buf['frame']:
+                   breaks.append((buf['frame'],buf['sbd']))
+                 last_buf = buf
+                 new_buf.append(buf)
+
+               #   should be pretty easy
+               real_break = new_buf[0]['shot_detect']
+               if len(breaks) > 0:
+                 breaks.sort(key=lambda x: x[1],reverse=True)
+                 real_break = breaks[0][0]
+
+               for buf in new_buf[0:2*window]:
+                 buf['shot_detect'] = real_break
                  self.Q.put_nowait(buf)
-                 # TODO: if no audio, pad with zero bytes
-                 play_audio += buf['audio']
-               data_buff = []
-               data['play_audio'] = play_audio
-               data['play_audio'] += data['audio']
-               self.Q.put_nowait(data)
+               data_buf = new_buf[2*window:]
              else:
-               data_buff.append(data)
+               data_buf.append(data)
              read_frame += 1
          elif self.video_fifo or self.image:
            if data.get('rframe') is not None:

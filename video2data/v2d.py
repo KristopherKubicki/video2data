@@ -12,6 +12,8 @@ SCALER = 0.2
 import os, sys, math
 import tensorflow as tf
 
+import matplotlib.pyplot as plt
+
 from utils2 import image as v2dimage
 from utils2 import sig as v2dsig
 from utils2 import realtime as realtime
@@ -108,7 +110,7 @@ import streams.cast
 cvs = None
 #cvs = streams.cast.CastVideoStream().load(WIDTH,HEIGHT)
 
-import detectors.shot
+#import detectors.shot
 
 all_stuff = []
 if ssd is not None:
@@ -169,6 +171,8 @@ if 1==1:
         kitti_frame = 0
         face_frame = 0
 
+        last_play_audio = bytes()
+
         while fvs.stopped.value == 0:
           if fvs.Q.qsize() < 1:
             if fvs.t and fvs.t.is_alive() is False:
@@ -177,13 +181,23 @@ if 1==1:
             time.sleep(0.1)
             continue
 
+# Main Reader from other processing thread
           data = fvs.read()
 
 # play the audio
           if fvs.display and data.get('play_audio') is not None:    
+            last_play_audio = data['play_audio']
             play_audio = pygame.mixer.Sound(data.get('play_audio'))
             sound1 = pygame.mixer.Sound(play_audio)
             channel1.queue(sound1)
+      
+            
+# TODO: Calculate the lookaheads for audio breaks
+#  these will inform the scene break detection
+          #if data.get('play_audio') is not None:
+              # break magnitudes into 30ms (1/fps) windows
+              # find all minimums. 
+              #  Scene break must fall on minimum
 
 
           frametime = datetime.datetime.utcnow().utcfromtimestamp(frame / fvs.fps).strftime('%H:%M:%S')
@@ -230,12 +244,25 @@ if 1==1:
           if data.get('transcribe'):
             last_transcribe = frame
 
-          data = detectors.shot.frame_to_contours(data,last_frame)
-          data = detectors.shot.frame_to_shots(data,last_frame)
-          if data.get('shot_detect') == frame and last_frame is not None:
+
+          if last_frame is not None and prev_shot.get('last_frame') is None and 'Blank' not in last_frame['shot_type']:
+            prev_shot['last_frame'] = last_frame['small']
+          if last_frame is not None and data['shot_detect'] == data['frame'] + 5:
+            prev_shot['closing'] = last_frame['small']
+
+          if data.get('shot_detect') == frame and last_frame is not None and prev_shot.get('last_frame') is not None:
+            if prev_shot['closing'] is None:
+              prev_shot['closing'] = last_frame['small']
+            if prev_scene['opening'] is None:
+              prev_scene['opening'] = prev_shot['closing']
             prev_shot['end'] = frame-1
-            prev_shot['shottime'] = datetime.datetime.utcnow().utcfromtimestamp((data['frame'] - prev_shot['start']) / data['fps']).strftime('%H:%M:%S')
+            prev_shot['break_type'] = data['break_type']
+            prev_shot['shottime'] = datetime.datetime.utcnow().utcfromtimestamp((prev_shot['start']) / data['fps']).strftime('%H:%M:%S,%f')[:-3]
+            prev_shot['length'] = float((prev_shot['end'] - prev_shot['start']) / FPS)
             log.shot_recap(prev_shot)
+            cv2.imshow('cur_frame',data['small'])
+            cv2.imshow('last_frame',prev_shot['last_frame'])
+
 
           if frame % 60 == 0:
             start_time = time.time()
@@ -246,29 +273,54 @@ if 1==1:
 # reset metrics if we detect scene break
 #
 # give a little bit of jitter  
-          if data.get('audio_detect') == frame and frame < data.get('shot_detect') + 5 and last_frame is not None:
+# 
+          if data.get('scene_detect') == frame and last_frame is not None:
             data['scene_detect'] = frame
-            # TODO: make this based on break_count instead
-            if (frame - last_frame['scene_detect']) / FPS > 1:
-              prev_scene['end'] = frame-1
-              prev_scene['break_type'] = data['frame_type']
-              prev_scene['scenetime'] = datetime.datetime.utcnow().utcfromtimestamp((prev_scene['end'] - prev_scene['start']) / FPS).strftime('%H:%M:%S')
-              prev_scene['length'] = float((frame - last_frame['scene_detect'] + data['break_count']) / FPS)
+            prev_scene['end'] = frame-1
+            prev_scene['break_type'] = prev_shot['break_type']
+            prev_scene['scenetime'] = datetime.datetime.utcnow().utcfromtimestamp((prev_scene['start']) / FPS).strftime('%H:%M:%S,%f')[:-3]
+            prev_scene['length'] = float((prev_scene['end'] - prev_scene['start']) / FPS)
+            prev_scene['last_frame'] = prev_shot.get('last_frame')
+            prev_scene['closing'] = prev_shot['closing']
 
-              # TODO move to DA contrib
-#              if data['com_detect'] != 'Programming' and int(prev_scene['length']) in [10,15,30,45,60]:
-#                data['com_detect'] = 'Commercial'
-#              prev_scene['type'] = data['com_detect']
+            # TODO move to DA contrib
+#            if data['com_detect'] != 'Programming' and int(prev_scene['length']) in [10,15,30,45,60]:
+#              data['com_detect'] = 'Commercial'
+#            prev_scene['type'] = data['com_detect']
+            log.scene_recap(prev_scene)
+            if False and prev_shot.get('last_frame') is not None:
+              plt.figure('%da' % frame)
+              tmp = np.fromstring(last_frame['audio'] + data['audio'],np.int16)
+              plt.plot(tmp)
+              plt.savefig('/tmp/a1.png')
+              plt.close()
+              img = cv2.imread('/tmp/a1.png')
+              cv2.imshow('shot_audio1+2',img)
 
+              plt.figure('%da' % frame)
+              tmp = np.fromstring(last_play_audio,np.int16)
+              plt.plot(tmp)
+              plt.savefig('/tmp/a1.png')
+              plt.close()
+              img = cv2.imread('/tmp/a1.png')
+              cv2.imshow('play_audio',img)
 
-              log.scene_recap(prev_scene)
-              prev_scene = v2dvar.new_scene(frame)
-              prev_shot = v2dvar.new_shot(frame)
+              cv2.imshow('cur_scene',data['small'])
+              cv2.imshow('last_scene',prev_scene['last_frame'])
+            if prev_scene['closing'] is not None:
+              cv2.imshow('closing',prev_scene['closing'])
+            if prev_scene['opening'] is not None:
+              cv2.imshow('opening',prev_scene['opening'])
 
-              caption_end = ''
-              frame_caption = ''
-              logo_detect_count = 0
-              scene_count += 1
+            prev_scene = v2dvar.new_scene(frame)
+            prev_shot = v2dvar.new_shot(frame)
+
+            caption_end = ''
+            frame_caption = ''
+            logo_detect_count = 0
+            scene_count += 1
+          if data.get('shot_detect') == frame:
+            prev_shot = v2dvar.new_shot(frame)
 
 ##################
 #
@@ -856,9 +908,9 @@ if 1==1:
             prev_shot['textprint'] += '0'
 
           if len(motion_hulls) > 0:
-            prev_shot['videoprint'] += '1'
+            prev_shot['motionprint'] += '1'
           else:
-            prev_shot['videoprint'] += '0'
+            prev_shot['motionprint'] += '0'
 
           if data and data.get('audio') is not None:
             # TODO:  check the audio level based on a few thing
@@ -899,7 +951,7 @@ if 1==1:
 # Pause a little longer between frames if we are going faster than
 #  the FPS as defined. potentially go the other way too
 #
-          if False and fvs.display and frame > 100 and local_fps > FPS:
+          if fvs.display and frame > 100 and local_fps > FPS:
             tmp = (local_fps-FPS)  / 60
             if tmp > 30:
               tmp = 30
