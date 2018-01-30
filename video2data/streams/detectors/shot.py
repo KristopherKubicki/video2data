@@ -102,10 +102,12 @@ def video_shot_detector(frame,last_frame):
     frame['shot_type'] = 'Blank'
     frame['shot_detect'] = frame['frame']
     frame['sbd'] = 0.99
+    print('BLANK', frame['frame'], frame['lum'],frame['mse'],v2dimage.chi2_distance(frame['hist'],last_frame['hist']),frame['gray_motion_mean'],len(frame['motion_hulls']))
   elif last_frame['width'] != frame['width'] or last_frame['height'] != frame['height']:
     frame['shot_type'] = 'Resize'
     frame['shot_detect'] = frame['frame']
     frame['sbd'] = 0.98
+    print('RESIZE', frame['frame'], frame['lum'],frame['mse'],v2dimage.chi2_distance(frame['hist'],last_frame['hist']),frame['gray_motion_mean'],len(frame['motion_hulls']))
 
   # Histogram filter looks for a pretty large delta 
   #  

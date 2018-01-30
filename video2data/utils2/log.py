@@ -27,7 +27,7 @@ def shot_recap(prev_shot):
   #    adj = 'Information '
 
   print('\t[%s] Title: Unnamed %sShot %d' % (shottime,adj,prev_shot['start']))
-  print('\t[%s] Length: %.02fs, %d frames' % (shottime,prev_shot['length'],prev_shot['end'] - prev_shot['start']))
+  print('\t[%s] Length: %.02fs, %d frames, %d end' % (shottime,prev_shot['length'],prev_shot['end'] - prev_shot['start'],prev_shot['end']))
   print('\t[%s] Detect Method: %s ' % (shottime,prev_shot['break_type']))
   #print('\t[%s] Signature: %s' % (shottime,v2dsig.phash_bits(prev_shot['audioprint'])))
   if prev_shot['summary']:
