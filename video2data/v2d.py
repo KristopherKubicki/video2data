@@ -261,8 +261,6 @@ if 1==1:
             prev_shot['closing'] = prev_shot['last_frame']
 
           if data.get('shot_detect') == frame and last_frame is not None and prev_shot.get('last_frame') is not None:
-            print("DETECTING!!!")
-            cv2.imshow('closing2',prev_shot['closing'])
             if prev_shot['closing'] is None:
               prev_shot['closing'] = last_frame['small']
             if prev_scene['opening'] is None:
@@ -273,9 +271,9 @@ if 1==1:
             prev_shot['shottime'] = datetime.datetime.utcnow().utcfromtimestamp((prev_shot['start']) / data['fps']).strftime('%H:%M:%S,%f')[:-3]
             prev_shot['length'] = float((prev_shot['end'] - prev_shot['start']) / FPS)
             log.shot_recap(prev_shot)
-            cv2.imshow('cur_frame',data['small'])
+            #cv2.imshow('cur_frame',data['small'])
             #data['show'][y:data['height']+y,x:data['width']+x:] = data['small'].copy()
-            cv2.imshow('last_frame',prev_shot['last_frame'])
+            #cv2.imshow('last_frame',prev_shot['last_frame'])
 
 
           if frame % 60 == 0:
@@ -283,13 +281,11 @@ if 1==1:
             fps_frame = 0
 
 #  SCENE BREAK DETECTOR
-#
-# reset metrics if we detect scene break
-#
-# give a little bit of jitter  
 # 
           if data.get('scene_detect') == frame and last_frame is not None:
             data['scene_detect'] = frame
+            if prev_scene['closing'] is None:
+              prev_scene['closing'] = last_frame['small']
             prev_scene['end'] = frame-1
             prev_scene['break_type'] = prev_shot['break_type']
             prev_scene['scenetime'] = datetime.datetime.utcnow().utcfromtimestamp((prev_scene['start']) / FPS).strftime('%H:%M:%S,%f')[:-3]
@@ -304,6 +300,7 @@ if 1==1:
             log.scene_recap(prev_scene)
             if False and prev_shot.get('last_frame') is not None:
               plt.figure('%da' % frame)
+              # I'm not sure if this is correct
               tmp = np.fromstring(last_frame['audio'] + data['audio'],np.int16)
               plt.plot(tmp)
               plt.savefig('/tmp/a1.png')

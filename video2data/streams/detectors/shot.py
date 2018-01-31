@@ -54,22 +54,38 @@ def frame_to_shots(frame,last_frame):
   if frame.get('audio'):
     frame = audio_shot_detector(frame,last_frame)
 
-
   if last_frame.get('gray') is not None and frame.get('gray') is not None and last_frame.get('gray').shape == frame.get('gray').shape:
     frame = video_shot_detector(frame,last_frame)
 
+# run the audio detector again if we believe we have a shot
+  if frame['shot_detect'] == frame['frame'] and frame.get('audio') and frame.get('audio_type') is None:
+    frame = audio_shot_detector(frame,last_frame)
+
   frame['break_type'] = '%s%s%d' % (frame['audio_type'],frame['shot_type'],frame['break_count'])
+
 
 # TODO: Scene SVM here.  
 #  Can a scene cut on motion?  I don't think so... 
-  if 'MOTION' in frame['shot_type']:
-    return frame
+#  but this seems to be true on ticker breaks
+#  if 'MOTION' in frame['shot_type']:
+#    return frame
+  scene_magic = 2
+  scene_len = int(10 * (frame['frame']-1 - frame['last_scene']) / frame['fps'])
+  if scene_len % 50 in [0]:
+    frame['sbd'] *= 3
+    scene_magic = 4
+  if scene_len % 50 in [49,1]:
+    frame['sbd'] *= 1.5
+    scene_magic = 3
+
+# TODO
+# Gray audio on a magic number
 
   if frame['audio_type'] and frame['shot_type']:
     print('HARD SCENE',frame['frametime'],frame['frame'],'\t',frame['break_type'])
     frame['scene_detect'] = frame['frame']
     frame['sbd'] *= 2
-  elif frame['audio_type'] and last_frame['shot_type']:
+  elif frame['audio_type'] and last_frame['shot_type'] and 'MOTION' not in last_frame['shot_type']:
     print('AUD SCENE',frame['frametime'],frame['frame'],'\t',frame['break_type'])
     frame['scene_detect'] = frame['frame']
     frame['sbd'] *= 1.5
@@ -77,15 +93,14 @@ def frame_to_shots(frame,last_frame):
     print('VID SCENE',frame['frametime'],frame['frame'],'\t',frame['break_type'])
     frame['scene_detect'] = frame['frame']
     frame['sbd'] *= 1.5
-  elif frame['shot_type'] and frame['audio_detect'] > frame['shot_detect'] - 4:
+  elif frame['shot_type'] and frame['audio_detect'] > frame['shot_detect'] - scene_magic:
     print('WA SCENE',frame['frametime'],frame['frame'],'\t',frame['break_type'])
     frame['scene_detect'] = frame['frame']
     frame['sbd'] *= 1.2
-  elif frame['audio_type'] and frame['shot_detect'] > frame['audio_detect'] - 4:
+  elif frame['audio_type'] and frame['shot_detect'] > frame['audio_detect'] - scene_magic:
     print('WV SCENE',frame['frametime'],frame['frame'],'\t',frame['break_type'])
     frame['scene_detect'] = frame['frame']
     frame['sbd'] *= 1.2
-  #TODO 5 incrementer
 
   return frame
 
@@ -117,17 +132,6 @@ def video_shot_detector(frame,last_frame):
   frame['scene_detect'] = last_frame.get('scene_detect')
   if frame['scene_detect'] is None:
     frame['scene_detect'] = 0
-
-
-  #if frame['frame'] == 450:
-  #  cv2.imshow('450',frame['small'])
-  #if frame['frame'] == 451:
-  #  cv2.imshow('451',frame['small'])
-  #if frame['frame'] == 452:
-  #  cv2.imshow('452',frame['small'])
-  #if frame['frame'] == 453:
-  #  cv2.imshow('453',frame['small'])
-  #cv2.waitKey(1)
 
   frame_mean = frame['frame_mean']
   last_mean = last_frame['frame_mean']
@@ -182,7 +186,8 @@ def video_shot_detector(frame,last_frame):
   if frame['shot_detect'] == frame['frame']:
     frame['motion_detect'] = frame['frame']
     if frame['break_count'] == 0:
-      print(frame['frame'],'v\t',frame['shot_type'],' %.1f %.1f :: ' % (frame['abd'],frame['zcr']),frame['frametime'],frame['frame'],'\t',frame['audio_type'],frame['break_count'],frame['silence'],frame['audio_level'],frame['speech_level'])
+     # print(frame['frame'],'v\t',frame['shot_type'],' %.1f %.1f :: ' % (frame['abd'],frame['zcr']),frame['frametime'],frame['frame'],'\t',frame['audio_type'],frame['break_count'],frame['silence'],frame['audio_level'],frame['speech_level'])
+      print(frame['frame'],'v\t',frame['shot_type'],'%d:%d' % (last_frame.get('raudio_max'),frame.get('raudio_max')))
     frame['break_count'] += 1
   else:
     frame['break_count'] = 0
@@ -193,14 +198,31 @@ def audio_shot_detector(frame,last_frame):
 
   if frame is None or last_frame is None:
     return frame
+
+  # broadcasters always go all the way to zero between shots.  Sometimes its for a very
+  #  short time though. This works out to be about 15ms, with the windows being 1ms apart
+  #last_audio = np.fromstring(last_frame['audio'] + frame['audio'],np.int16)
+  last_audio = np.fromstring(last_frame['audio'] + frame['audio'],np.int16)
+  for i in range(23):
+    frame['rolling_np'] = last_audio[i*100:i*100+735]
+    if len(frame['rolling_np']) > 0:
+      tmp = frame['rolling_np'].max(axis=0)
+      if tmp < 3 and tmp < frame['raudio_max'] and tmp > 0:
+        print('from',i*100,i*100+735,tmp,len(last_audio),len(frame['audio']))
+        frame['raudio_max'] = frame['rolling_np'].max(axis=0)
+        frame['raudio_mean'] = frame['rolling_np'].mean(axis=0)
+
+  # TODO: penalize blocks that falsly trigger this indicator
+  #  Block ROS on first miss hit
+  if frame['raudio_mean'] < 3:    
+    print(frame['frame'],'ROLLING SILENCE!',frame['raudio_mean'],frame['raudio_max'])
   
   # cheap, efficient energy detector. Anything over 0.01 is suspect, but not confirmed
   # the first occurence of this matters
-  #tmp = last_frame['audio_np'].copy()
-  #tmp.append(frame['audio_np'])
   #mags1 = np.fft.rfft(np.append(last_frame['audio_np'],frame['audio_np']))
   mags2 = np.fft.rfft(frame['audio_np'])
   s2 = set(mags2)
+  #s1 = set(mags1)
   # indicates a signal is near zero 
   zero_crossings = np.where(np.diff(np.sign(mags2)))[0]
   mags = np.abs(mags2)
@@ -216,41 +238,73 @@ def audio_shot_detector(frame,last_frame):
   # TODO: implement ffmpeg loudnorm, otherwise these volume levels are arbitrary
 
   if frame['audio_level'] == 0:
-    if frame['zcr'] == 0:
-      print('warning! audio defect')
-    if len(frame['edges']) == 0:
+    if frame['zcr'] > 0 and len(frame['edges']) == 0:
       frame['audio_type'] = 'HARD'
       frame['audio_detect'] = frame['frame']
-  elif frame['audio_level'] < 1 and frame['silence'] > 20:
-    frame['audio_type'] = 'ZERO'
+    else:
+      print('warning! audio defect')
+  elif frame['raudio_mean'] < 5:
+    frame['audio_type'] = 'ROS'
     frame['audio_detect'] = frame['frame']
-  elif frame['audio_level'] < 1 and frame['zcr'] > 20:
-    frame['audio_type'] = 'ZCR'
+  elif frame['audio_mean'] < 0.1 and frame['audio_mean'] > -0.1 and frame['audio_max'] < 3:
+    frame['audio_type'] = 'ZAA'
     frame['audio_detect'] = frame['frame']
-  elif frame['audio_level'] < 20 and frame['abd'] > 0.01 and frame['speech_level'] < 0.5:
+  elif frame['raudio_mean'] < 0.1 and frame['raudio_mean'] > -0.1 and frame['raudio_max'] < 3:
+    frame['audio_type'] = 'ZAR'
+    frame['audio_detect'] = frame['frame']
+  elif frame['audio_max'] < 2:
+    frame['audio_type'] = 'ZDB'
+    frame['audio_detect'] = frame['frame']
+  elif frame['audio_level'] < 1 and frame['silence'] > 50 and frame['speech_level'] < 0.2:
+    frame['audio_type'] = 'ZEF'
+    frame['audio_detect'] = frame['frame']
+  elif frame['audio_level'] < 1 and frame['zcr'] > 0.4 and frame['speech_level'] < 0.2:
+    frame['audio_type'] = 'ZRR'
+    frame['audio_detect'] = frame['frame']
+  elif frame['audio_max'] < 10 and frame['silence'] > 500:
+    frame['audio_type'] = 'ZZM'
+    frame['audio_detect'] = frame['frame']
+  elif frame['audio_max'] < 10 and frame['silence'] > 500:
+    frame['audio_type'] = 'ZZM'
+    frame['audio_detect'] = frame['frame']
+  elif frame['audio_level'] < 2 and frame['abd'] > 0.5 and frame['silence'] > 200 and last_frame['audio_detect'] == last_frame['frame']:
+    frame['audio_type'] = 'CUT'
+    frame['audio_detect'] = frame['frame']
+  elif frame['audio_level'] < 20 and frame['abd'] > 0.01 and frame['speech_level'] < 0.1 and frame['audio_max'] < 10:
     frame['audio_type'] = 'PEAK'
     frame['audio_detect'] = frame['frame']
-  elif frame['audio_level'] < 1 and frame['silence'] > 10:
+  elif frame['audio_level'] < 20 and frame['abd'] > 0.03 and frame['silence'] > 20 and frame['audio_max'] < 10:
     frame['audio_type'] = 'SOFT'
     frame['audio_detect'] = frame['frame']
-  elif frame['audio_level'] < 20 and frame['silence'] > 50:
-    frame['audio_type'] = 'MICRO'
-    frame['audio_detect'] = frame['frame']
+#  elif frame['audio_level'] < 20 and frame['silence'] > 50 and frame['speech_level'] < 0.1:
+#    frame['audio_type'] = 'MICRO'
+#    frame['audio_detect'] = frame['frame']
+#  elif frame['abd'] > 0.02 and frame['silence'] > 50 and frame['audio_level'] < 10:
+#    frame['audio_type'] = 'CUT'
+#    frame['audio_detect'] = frame['frame']
   elif frame['abd'] > 1:
     frame['audio_type'] = 'DEFECT'
     frame['audio_detect'] = frame['frame']
+  elif frame['silence'] > 1000:
+    frame['audio_type'] = 'NULL'
+    frame['audio_detect'] = frame['frame']
+   
+  # blank + gray is usually a scene
    
   # new detectors 
   if frame['audio_detect'] == frame['frame']:
-    print(frame['frame'],'a\t',frame['audio_type'],' %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['frametime'],frame['frame'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'],frame['speech_level'])
-  elif frame['abd'] > 0.01 and frame['audio_level'] < 20:
-    print(frame['frame'],'m\tGRAY\t\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['frame'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'])
+    print(frame['frame'],'a\t',frame['audio_type'],' %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['frametime'],frame['audio_max'],frame['audio_mean'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'],frame['speech_level'])
+  elif frame['abd'] > 0.01 and frame['audio_level'] < 20 and frame['speech_level'] < 0.2:
+    print(frame['frame'],'m\tGRAY\t\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['audio_max'],frame['audio_mean'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'])
   elif frame['zcr'] > 0.5 and frame['audio_level'] < 10:
-    print(frame['frame'],'m\tZCR\t\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['frame'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'])
+    print(frame['frame'],'m\tZCR\t\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['audio_max'],frame['audio_mean'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'])
   elif frame['shot_detect'] == frame['frame']: 
-    print(frame['frame'],'m\tMISS\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['frametime'],frame['frame'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'],frame['speech_level'])
+    print(frame['frame'],'m\tMISS\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['audio_max'],frame['audio_mean'],frame['frametime'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'],frame['speech_level'])
   elif last_frame['audio_detect'] == frame['frame'] - 1:
-    print(frame['frame'],'m\tECHO\t\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['frame'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'])
+    print(frame['frame'],'m\tECHO\t\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['audio_max'],frame['audio_mean'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'])
+  elif frame['audio_mean'] < 0.1 and frame['audio_mean'] > -0.1 and frame['audio_max'] < 10:
+    print(frame['frame'],'S\tSILENT\t\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['audio_max'],frame['audio_mean'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'])
+
 
  
 

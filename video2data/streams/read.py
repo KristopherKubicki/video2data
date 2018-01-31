@@ -60,6 +60,11 @@ def new_frame(frame_num=0):
   # zeros in the audio frame - a measure of artificial silence
   frame['silence'] = 0
 
+  frame['raudio_max'] = 100
+  frame['raudio_mean'] = 100
+  frame['audio_max'] = 100
+  frame['audio_mean'] = 100
+
   # how much speech is in the frame
   frame['speech_level'] = 0.0
   return frame
@@ -147,8 +152,11 @@ class FileVideoStream:
       self.stream = str.replace(self.stream,'@','\\\@')
  
       # we should probably always stick to 're' for most video
-      video_command = [ 'ffmpeg','-nostdin','-hide_banner','-loglevel','panic','-hwaccel','vdpau','-y','-vsync','1','-f', 'lavfi','-i','movie=%s:s=0\\\:v+1\\\:a[out0+subcc][out1]' % self.stream,'-map','0:v','-vf','bwdif=0:-1:1','-vf','scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2' % (self.width,self.height,self.width,self.height),'-pix_fmt','bgr24','-r','%f' % self.fps,'-s','%dx%d' % (self.width,self.height),'-vcodec','rawvideo','-f','rawvideo','/tmp/%s_video' % self.name, '-map','0:a','-acodec','pcm_s16le','-r','%f' % self.fps,'-ab','16k','-ar','%d' % self.sample,'-ac','1','-f','wav','/tmp/%s_audio' % self.name, '-map','0:s','-f','srt','/tmp/%s_caption' % self.name  ] 
+      #video_command = [ 'ffmpeg','-nostdin','-hide_banner','-loglevel','panic','-hwaccel','vdpau','-y','-vsync','1','-f', 'lavfi','-i','movie=%s:s=0\\\:v+1\\\:a[out0+subcc][out1]' % self.stream,'-map','0:v','-vf','bwdif=0:-1:1','-vf','scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2' % (self.width,self.height,self.width,self.height),'-pix_fmt','bgr24','-r','%f' % self.fps,'-s','%dx%d' % (self.width,self.height),'-vcodec','rawvideo','-f','rawvideo','/tmp/%s_video' % self.name, '-map','0:a','-acodec','pcm_s16le','-r','%f' % self.fps,'-ab','16k','-ar','%d' % self.sample,'-ac','1','-f','wav','/tmp/%s_audio' % self.name, '-map','0:s','-f','srt','/tmp/%s_caption' % self.name  ] 
       #video_command = [ 'ffmpeg','-nostdin','-hide_banner','-loglevel','panic','-hwaccel','vdpau','-y','-vsync','1','-f', 'lavfi','-i','movie=%s:s=0\\\:v+1\\\:a[out0+subcc][out1]' % self.stream,'-map','0:v','-vf','bwdif=0:-1:1','-vf','scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2' % (self.width,self.height,self.width,self.height),'-pix_fmt','bgr24','-r','%f' % self.fps,'-s','%dx%d' % (self.width,self.height),'-vcodec','rawvideo','-f','rawvideo','/tmp/%s_video' % self.name, '-map','0:a','-af','loudnorm=I=-16:TP=-1.5:LRA=11','-acodec','pcm_s16le','-r','%f' % self.fps,'-ab','16k','-ar','%d' % self.sample,'-ac','1','-f','wav','/tmp/%s_audio' % self.name, '-map','0:s','-f','srt','/tmp/%s_caption' % self.name  ] 
+      video_command = [ 'ffmpeg','-nostdin','-hide_banner','-loglevel','panic','-hwaccel','vdpau','-y','-vsync','1','-f', 'lavfi','-i','movie=%s:s=0\\\:v+1\\\:a[out0+subcc][out1]' % self.stream,'-map','0:v','-vf','blackframe','-vf','blackdetect=d=0.03:pix_th=0.00','-vf','cropdetect=0.01:16:30','-vf','bwdif=0:-1:1','-vf','scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2' % (self.width,self.height,self.width,self.height),'-vsync','cfr','-pix_fmt','bgr24','-r','%f' % self.fps,'-s','%dx%d' % (self.width,self.height),'-vcodec','rawvideo','-f','rawvideo','/tmp/%s_video' % self.name, '-map','0:a','-af','loudnorm=I=-16:TP=-1.5:LRA=11','-ar','%d' % self.sample,'-ac','1','-af','silencedetect=n=-85dB:d=0.03','-acodec','pcm_s16le','-r','%f' % self.fps,'-f','wav','/tmp/%s_audio' % self.name, '-map','0:s','-f','srt','/tmp/%s_caption' % self.name  ] 
+
+      #print('ffmpeg cmd',' '.join(video_command))
       self.pipe = subprocess.Popen(video_command)
 
       print('Step 2 initializing video /tmp/%s_video' % self.name)
@@ -293,6 +301,7 @@ class FileVideoStream:
 
      data_buf = []
      last_buf = None
+     last_scene = 0
 
      play_audio = bytearray()
      raw_audio = bytes()
@@ -312,9 +321,6 @@ class FileVideoStream:
        if self.Q.qsize() >= self.fps*3:
          time.sleep(0.1)
          continue
-         
-       #data = new_frame(read_frame)
-       #data['fps'] = self.fps
          
        if self.audio_poll is None and self.video_poll is None and self.image is False:
          print('done')
@@ -365,6 +371,8 @@ class FileVideoStream:
        if data is not None and data.get('audio') is not None and data.get('audio_np') is None:
          data['audio_np'] = np.fromstring(data['audio'],np.int16)
          data['audio_level'] = np.std(data['audio_np'])
+         data['audio_max'] = data['audio_np'].max(axis=0)
+         data['audio_mean'] = data['audio_np'].mean(axis=0)
          longest = 0
          last = 0
                
@@ -482,9 +490,6 @@ class FileVideoStream:
              data_buf[0]['play_audio'] = cast_audio
 
              # TODO: if no audio, pad with zero bytes
-             # TODO: peek ahead, find blank frames, break candidates
-             #  TODO: move last_buf to previous buf block
-
              # this is basically a NMS algorithm.  Find all the upcoming breaks
              #  and take the strongest one
              new_buf = []
@@ -509,10 +514,11 @@ class FileVideoStream:
                scenes.sort(key=lambda x: x[1],reverse=True)
                print('upcoming scenes',scenes)
                real_break = scenes[0][0]
+               last_scene = real_break
              elif len(breaks) > 0:
                breaks.sort(key=lambda x: x[0],reverse=True)
                breaks.sort(key=lambda x: x[1],reverse=True)
-               print('upcoming breaks',breaks)
+               #print('upcoming breaks',breaks)
                real_break = breaks[0][0]
 
              for buf in new_buf[0:2*window]:
@@ -523,6 +529,7 @@ class FileVideoStream:
              data_buf.append(data)
            read_frame += 1
            data = new_frame(read_frame)
+           data['last_scene'] = last_scene
            data['fps'] = self.fps
        elif self.video_fifo or self.image:
          if data.get('rframe') is not None:
