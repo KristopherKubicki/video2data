@@ -4,6 +4,8 @@
 #
 
 FPS = 30
+#WIDTH = 1280
+#HEIGHT = 720
 WIDTH = 1280
 HEIGHT = 720
 SAMPLE = 44100
@@ -110,7 +112,6 @@ import streams.cast
 cvs = None
 #cvs = streams.cast.CastVideoStream().load(WIDTH,HEIGHT)
 
-#import detectors.shot
 
 all_stuff = []
 if ssd is not None:
@@ -135,7 +136,7 @@ if 1==1:
     all_faces = []
     while True:
       for source in sources:
-        if source[0] == '#':
+        if source[0] in ['#',' ']:
           continue
 
         fvs = streams.read.FileVideoStream(source).load(WIDTH,HEIGHT,FPS,SAMPLE)
@@ -144,6 +145,7 @@ if 1==1:
 
         last_frame = None
         prev_scene = v2dvar.new_scene(0)
+        prev_prev_scene = v2dvar.new_scene(0)
         prev_shot = v2dvar.new_shot(0)
 
         frame_caption = ''
@@ -198,18 +200,11 @@ if 1==1:
           if fvs.display and data.get('play_audio') is not None:    
             last_play_audio = data['play_audio']
             play_audio = pygame.mixer.Sound(data.get('play_audio'))
-            sound1 = pygame.mixer.Sound(play_audio)
-            channel1.queue(sound1)
+            # don't play the first packet. annoying pop
+            if data['frame'] > 1:
+              sound1 = pygame.mixer.Sound(play_audio)
+              channel1.queue(sound1)
       
-            
-# TODO: Calculate the lookaheads for audio breaks
-#  these will inform the scene break detection
-          #if data.get('play_audio') is not None:
-              # break magnitudes into 30ms (1/fps) windows
-              # find all minimums. 
-              #  Scene break must fall on minimum
-
-
           frametime = datetime.datetime.utcnow().utcfromtimestamp(frame / fvs.fps).strftime('%H:%M:%S')
           filetime = datetime.datetime.utcnow().utcfromtimestamp(fvs.microclockbase + fvs.clockbase).strftime('%H:%M:%S')
           local_fps = fps_frame / (time.time() - start_time)
@@ -239,13 +234,6 @@ if 1==1:
 #          if last_frame and last_frame.get('com_detect') and last_frame.get('shot_detect') != last_frame.get('frame'):
 #            data['com_detect'] = last_frame['com_detect']
 
-          data['ssd_rects'] = []
-          data['human_rects'] = []
-          data['face_rects'] = []
-          data['vehicle_rects'] = []
-          data['object_rects'] = []
-          data['text_rects'] = []
-          data['text_hulls'] = []
           if last_frame and last_frame['text_hulls']:
             data['text_hulls'] = last_frame['text_hulls']
           if data['frame'] % 1000 == 0 and data['frame'] > 1:
@@ -253,7 +241,6 @@ if 1==1:
           
           if data.get('transcribe'):
             last_transcribe = frame
-
 
           if last_frame and 'BLANK' not in last_frame['shot_type'] and last_frame['frame'] < last_frame['shot_detect'] - 2:
             prev_shot['last_frame'] = last_frame['small']
@@ -272,9 +259,6 @@ if 1==1:
             prev_shot['length'] = float((prev_shot['end'] - prev_shot['start']) / FPS)
             log.shot_recap(prev_shot)
             #cv2.imshow('cur_frame',data['small'])
-            #data['show'][y:data['height']+y,x:data['width']+x:] = data['small'].copy()
-            #cv2.imshow('last_frame',prev_shot['last_frame'])
-
 
           if frame % 60 == 0:
             start_time = time.time()
@@ -298,31 +282,9 @@ if 1==1:
 #              data['com_detect'] = 'Commercial'
 #            prev_scene['type'] = data['com_detect']
             log.scene_recap(prev_scene)
-            if False and prev_shot.get('last_frame') is not None:
-              plt.figure('%da' % frame)
-              # I'm not sure if this is correct
-              tmp = np.fromstring(last_frame['audio'] + data['audio'],np.int16)
-              plt.plot(tmp)
-              plt.savefig('/tmp/a1.png')
-              plt.close()
-              img = cv2.imread('/tmp/a1.png')
-              cv2.imshow('shot_audio1+2',img)
 
-              plt.figure('%da' % frame)
-              tmp = np.fromstring(last_play_audio,np.int16)
-              plt.plot(tmp)
-              plt.savefig('/tmp/a1.png')
-              plt.close()
-              img = cv2.imread('/tmp/a1.png')
-              cv2.imshow('play_audio',img)
-
-              cv2.imshow('cur_scene',data['small'])
-              cv2.imshow('last_scene',prev_scene['last_frame'])
-            if prev_scene['closing'] is not None:
-              cv2.imshow('closing',prev_scene['closing'])
-            if prev_scene['opening'] is not None:
-              cv2.imshow('opening',prev_scene['opening'])
-
+            print('write out')
+            prev_prev_scene = prev_scene
             prev_scene = v2dvar.new_scene(frame)
             prev_shot = v2dvar.new_shot(frame)
 
@@ -330,6 +292,27 @@ if 1==1:
             frame_caption = ''
             logo_detect_count = 0
             scene_count += 1
+
+
+          if prev_prev_scene['opening'] is not None:
+            y = data['small'].shape[0]
+            x = data['small'].shape[1]
+            data['show'][data['height']-y-20:data['height']-20,20:x+20] = prev_prev_scene['opening'].copy()
+          if prev_prev_scene['closing'] is not None:
+            y = data['small'].shape[0]
+            x = data['small'].shape[1]
+            data['show'][data['height']-y-20:data['height']-20,x+40:2*x+40] = prev_prev_scene['closing'].copy()
+
+          if prev_scene['opening'] is not None:
+            y = data['small'].shape[0]
+            x = data['small'].shape[1]
+            data['show'][data['height']-y-20:data['height']-20,2*x+60:3*x+60] = prev_scene['opening'].copy()
+          if prev_scene['closing'] is not None:
+            y = data['small'].shape[0]
+            x = data['small'].shape[1]
+            data['show'][data['height']-y-20:data['height']-20,3*x+80:4*x+80] = prev_scene['closing'].copy()
+            #cv2.imshow('last_frame',prev_shot['last_frame'])
+
           if data.get('shot_detect') == frame:
             prev_shot = v2dvar.new_shot(frame)
 

@@ -46,15 +46,19 @@ def frame_to_shots(frame,last_frame):
     frame['shot_detect'] = last_frame['shot_detect']
   if last_frame and last_frame.get('audio_detect'):
     frame['audio_detect'] = last_frame['audio_detect']
+  if last_frame and last_frame.get('scene_detect'):
+    frame['scene_detect'] = last_frame['scene_detect']
+  if last_frame and last_frame.get('isolation'):
+    frame['isolation'] = last_frame['isolation']
 
 # TODO: Scene SVM here.  
 #  Can a scene cut on motion?  I don't think so... 
 #  but this seems to be true on ticker breaks
   frame['magic'] = 1
   scene_len = int(10 * (frame['frame'] - frame['last_scene']) / frame['fps'])
-  if scene_len % 50 in [0]:
+  if scene_len >= 90 and scene_len % 50 in [0]:
     frame['magic'] = 3
-  elif scene_len % 50 in [49,1]:
+  elif scene_len > 90 and scene_len % 50 in [49,1]:
     frame['magic'] = 2
 
 #
@@ -73,15 +77,19 @@ def frame_to_shots(frame,last_frame):
 
   frame['break_type'] = '%s%s%d' % (frame['audio_type'],frame['shot_type'],frame['break_count'])
 
-# TODO
-# Gray audio on a magic number
 
   frame['sbd'] *= frame['magic']
+
+
+  #
+  # Allow the scene to cut if the audio and visual break at the same time, or within a 
+  #  frame or two. An extra frame or two is given if the shot is aligning to a magic 5
+  #  second interval
+  #
   if frame['audio_type'] and frame['shot_type']:
     print('HARD SCENE',frame['frametime'],frame['frame'],'\t',frame['break_type'])
     frame['scene_detect'] = frame['frame']
     frame['sbd'] *= 2
-  #elif frame['audio_type'] and last_frame['shot_type'] and 'MOTION' not in last_frame['shot_type']:
   elif frame['audio_type'] and last_frame['shot_type']:
     print('AUD SCENE',frame['frametime'],frame['frame'],'\t',frame['break_type'])
     frame['scene_detect'] = frame['frame']
@@ -98,6 +106,29 @@ def frame_to_shots(frame,last_frame):
     print('WV SCENE',frame['frametime'],frame['frame'],'\t',frame['break_type'])
     frame['scene_detect'] = frame['frame']
     frame['sbd'] *= 1.2
+  elif frame['shot_detect'] == frame['frame'] and frame['magic'] > 2 and frame['shot_type'] == 'BLANK':
+    print('warning! magic blank shot!',frame['audio_level'],frame['audio_max'])
+    frame['scene_detect'] = frame['frame']
+    frame['sbd'] *= 1.0
+
+  # sometimes a scene will cut twice in rapid succession.  Give this an opportunity to trigger but
+  #  not less than 1 second after it already cut
+  if frame['scene_detect'] == frame['frame'] and last_frame['scene_detect'] + frame['fps'] > frame['frame'] and frame['sbd'] < 1:
+    print('warning, dropping double cut!')
+    frame['scene_detect'] = last_frame['scene_detect']
+    frame['sbd'] *= 0.1 
+   
+  # if we start getting ROS false positives, this is likely a highly isolated voice over commercial with no other audio
+  #  the silence detector is very sensitive to this kind of audio, and thus the ROS detector has to be turned off if we 
+  #  start getting misses on it.  It reactivates with a scene change, which means one of the other 10 backup mechanisms 
+  #  have to find the break
+  # Keep in mind, the ROS detector is responsible for almost all scene detection otherwise
+  if frame['shot_detect'] != frame['frame'] and frame['audio_detect'] > frame['scene_detect'] + frame['fps'] and frame['audio_detect'] < frame['frame'] - 5 and frame['isolation'] is False:
+    print(':::::::::::::  setting isolation!!!',frame['frame'])
+    frame['isolation'] = True
+
+  if frame['scene_detect'] == frame['frame']:
+    frame['isolation'] = False
 
   return frame
 
@@ -194,8 +225,8 @@ def video_shot_detector(frame,last_frame):
     frame['motion_start'] = frame['motion_detect']
   if frame['shot_detect'] == frame['frame']:
     frame['motion_detect'] = frame['frame']
-    if frame['break_count'] == 0:
-      print(frame['frame'],'v\t',frame['shot_type'],'%d:%d' % (last_frame.get('raudio_max'),frame.get('raudio_max')))
+    #if frame['break_count'] == 0:
+    #  print(frame['frame'],'v\t',frame['shot_type'],'%d:%d' % (last_frame.get('raudio_max'),frame.get('raudio_max')))
     frame['break_count'] += 1
   else:
     frame['break_count'] = 0
@@ -218,37 +249,137 @@ def audio_shot_detector(frame,last_frame):
   #  this feature is unique and pretty easy to spot.  
   #  sometimes its just a single trough
   #
-  #if frame['audio_level'] < 100 and frame['speech_level'] < 0.7:
-  #if frame['audio_level'] < 100:
-  if frame['audio_max'] < 1000:
+  frame['rms'] = np.sqrt(np.mean(frame['audio_np']**2))
+  #if frame['rms'] < 10: 
+  #  print(' RMS! ',frame['frame'],frame['rms'],frame['audio_level'],frame['audio_mean'])
+
+  audio_score = 1 
+  #if frame['isolation'] is False and (frame['frame'] > frame['scene_detect'] + (3 * frame['fps']) or frame['magic'] > 1 or frame['shot_type'] or last_frame['shot_type']):
+  if frame['frame'] > frame['scene_detect'] + 5 and frame['isolation'] is False and frame['rms'] < 50 and (frame['audio_max'] < 20 or frame['rms'] < 20 or frame['magic'] > 1 or frame['shot_detect']):
+    #print('.. ',frame['frame'],frame['audio_power'],frame['audio_level'],frame['rms'])
     last_audio = np.fromstring(last_frame['audio'] + frame['audio'],np.int16)
-    for i in range(22):
-      frame['rolling_np'] = last_audio[i*100:i*100+800]
+    last_audio = abs(last_audio)
+
+    # TODO: Clustering
+    #  this math only makes sense for the fixed 44.1hz sample rate
+    for i in range(2):
+      if audio_score > 1:
+        break
+      # small compromise on this part of the pyramid.
+      frame['rolling_np'] = last_audio[i*900:i*900+2048]
       if len(frame['rolling_np']) > 0:
         rmax = frame['rolling_np'].max(axis=0)
         rmean = frame['rolling_np'].mean(axis=0)
-        if rmax <= 2 and rmax < frame['raudio_max'] and rmax >= 0 and abs(rmean) < 3:
-          #print('1from',i,i*100,i*100+800,rmean,rmax,len(last_audio),len(frame['audio']))
-          frame['raudio_max'] = frame['rolling_np'].max(axis=0)
-          frame['raudio_mean'] = frame['rolling_np'].mean(axis=0)
-    for i in range(31):
-      frame['rolling_np'] = last_audio[i*80:i*80+400]
+        if rmax <= 8 and rmax >= 0 and abs(rmean) <= 8:
+          if rmax < frame['raudio_max']:
+            print('>>>>>>>>> 9from',i,i*900,i*900+2048,rmean,rmax,audio_score)
+            frame['raudio_max'] = frame['rolling_np'].max(axis=0)
+            frame['raudio_mean'] = frame['rolling_np'].mean(axis=0)
+          audio_score =  9
+    for i in range(4):
+      if audio_score > 1:
+        break
+      frame['rolling_np'] = last_audio[i*512:i*512+1024]
       if len(frame['rolling_np']) > 0:
         rmax = frame['rolling_np'].max(axis=0)
         rmean = frame['rolling_np'].mean(axis=0)
-        if rmax <= 1 and rmax < frame['raudio_max'] and rmax >= 0 and abs(rmean) < 2:
-          #print('2from',i,i*80,i*80+400,rmean,rmax,len(last_audio),len(frame['audio']))
-          frame['raudio_max'] = frame['rolling_np'].max(axis=0)
-          frame['raudio_mean'] = frame['rolling_np'].mean(axis=0)
-    for i in range(54):
-      frame['rolling_np'] = last_audio[i*40:i*40+200]
+        if rmax <= 7 and rmax >= 0 and abs(rmean) <= 7:
+          if rmax < frame['raudio_max']:
+            print('>>>>>>>> 8from',i,i*512,i*512+1024,rmean,rmax,audio_score)
+            frame['raudio_max'] = frame['rolling_np'].max(axis=0)
+            frame['raudio_mean'] = frame['rolling_np'].mean(axis=0)
+          audio_score =  8
+    for i in range(10):
+      if audio_score > 1:
+        break
+      frame['rolling_np'] = last_audio[i*256:i*256+512]
       if len(frame['rolling_np']) > 0:
         rmax = frame['rolling_np'].max(axis=0)
         rmean = frame['rolling_np'].mean(axis=0)
-        if rmax == 0 and rmax < frame['raudio_max'] and rmax >= 0 and abs(rmean) < 1:
-          print('3from',i,i*40,i*40+200,rmean,rmax,len(last_audio),len(frame['audio']))
-          frame['raudio_max'] = frame['rolling_np'].max(axis=0)
-          frame['raudio_mean'] = frame['rolling_np'].mean(axis=0)
+        if rmax <= 6 and rmax >= 0 and abs(rmean) <= 6:
+          if rmax < frame['raudio_max']:
+            print('>>>>>> 7from',i,i*256,i*256+512,rmean,rmax,audio_score)
+            frame['raudio_max'] = frame['rolling_np'].max(axis=0)
+            frame['raudio_mean'] = frame['rolling_np'].mean(axis=0)
+          audio_score = 7
+    for i in range(21):
+      if audio_score > 1:
+        break
+      frame['rolling_np'] = last_audio[i*128:i*128+256]
+      if len(frame['rolling_np']) > 0:
+        rmax = frame['rolling_np'].max(axis=0)
+        rmean = frame['rolling_np'].mean(axis=0)
+        if rmax <= 5 and rmax >= 0 and abs(rmean) <= 5:
+          if rmax < frame['raudio_max']:
+            print('>>>>>> 6from',i,i*128,i*128+256,rmean,rmax,audio_score)
+            frame['raudio_max'] = frame['rolling_np'].max(axis=0)
+            frame['raudio_mean'] = frame['rolling_np'].mean(axis=0)
+          audio_score = 6
+    for i in range(43):
+      if audio_score > 1:
+        break
+      frame['rolling_np'] = last_audio[i*64:i*64+128]
+      if len(frame['rolling_np']) > 0:
+        rmax = frame['rolling_np'].max(axis=0)
+        rmean = frame['rolling_np'].mean(axis=0)
+        if rmax <= 4 and rmax >= 0 and abs(rmean) <= 4:
+          if rmax < frame['raudio_max']:
+            print('>>>>> 5from',i,i*64,i*64+128,rmean,rmax,audio_score)
+            frame['raudio_max'] = frame['rolling_np'].max(axis=0)
+            frame['raudio_mean'] = frame['rolling_np'].mean(axis=0)
+          audio_score = 5
+    for i in range(89):
+      if audio_score > 1:
+        break
+      frame['rolling_np'] = last_audio[i*32:i*32+64]
+      if len(frame['rolling_np']) > 0:
+        rmax = frame['rolling_np'].max(axis=0)
+        rmean = frame['rolling_np'].mean(axis=0)
+        if rmax <= 3 and rmax >= 0 and abs(rmean) <= 3:
+          if rmax < frame['raudio_max']:
+            print('>>>> 4from',i,i*32,i*32+64,rmean,rmax,audio_score)
+            frame['raudio_max'] = frame['rolling_np'].max(axis=0)
+            frame['raudio_mean'] = frame['rolling_np'].mean(axis=0)
+          audio_score = 4
+    for i in range(187):
+      if audio_score > 1:
+        break
+      frame['rolling_np'] = last_audio[i*16:i*16+32]
+      if len(frame['rolling_np']) > 0:
+        rmax = frame['rolling_np'].max(axis=0)
+        rmean = frame['rolling_np'].mean(axis=0)
+        if rmax <= 2 and rmax >= 0 and abs(rmean) <= 2:
+          if rmax < frame['raudio_max']:
+            print('>>> 3from',i,i*16,i*16+32,rmean,rmax,audio_score)
+            frame['raudio_max'] = frame['rolling_np'].max(axis=0)
+            frame['raudio_mean'] = frame['rolling_np'].mean(axis=0)
+          audio_score = 3
+    for i in range(367):
+      if audio_score > 1:
+        break
+      frame['rolling_np'] = last_audio[i*8:i*8+16]
+      if len(frame['rolling_np']) > 0:
+        rmax = frame['rolling_np'].max(axis=0)
+        rmean = frame['rolling_np'].mean(axis=0)
+        if rmax <= 1 and rmax >= 0 and abs(rmean) <= 1:
+          if rmax < frame['raudio_max']:
+            print('>> 2from',i,i*8,i*8+16,rmean,rmax,audio_score)
+            frame['raudio_max'] = frame['rolling_np'].max(axis=0)
+            frame['raudio_mean'] = frame['rolling_np'].mean(axis=0)
+          audio_score = 2
+    for i in range(734):
+      if audio_score > 1:
+        break
+      frame['rolling_np'] = last_audio[i*4:i*4+8]
+      if len(frame['rolling_np']) > 0:
+        rmax = frame['rolling_np'].max(axis=0)
+        rmean = frame['rolling_np'].mean(axis=0)
+        if rmax == 0 and abs(rmean) <= 1:
+          if rmax < frame['raudio_max']:
+            print('> 1from',i,i*4,i*4+8,rmean,rmax,audio_score)
+            frame['raudio_max'] = frame['rolling_np'].max(axis=0)
+            frame['raudio_mean'] = frame['rolling_np'].mean(axis=0)
+          audio_score = 1
 
   # cheap, efficient energy detector. Anything over 0.01 is suspect, but not confirmed
   # the first occurence of this matters
@@ -271,14 +402,14 @@ def audio_shot_detector(frame,last_frame):
   # TODO: implement ffmpeg loudnorm, otherwise these volume levels are arbitrary
 
   # TODO: 'dead' audio that isnt proceeded by a ROS might be corruption
-  if frame['audio_mean'] < 0.1 and frame['audio_mean'] > -0.1 and frame['audio_max'] < 10 and last_frame['audio_type'] == 'ROS':
-    frame['audio_type'] = 'ROS'
+  if frame['raudio_mean'] <= 9:
+    frame['audio_type'] = 'ROS%d' % audio_score 
+    frame['audio_detect'] = frame['frame']
+  elif frame['audio_mean'] < 0.1 and frame['audio_mean'] > -0.1 and frame['audio_max'] < 10 and last_frame['audio_type'][:3] == 'ROS':
+    frame['audio_type'] = 'ROS+'
     frame['audio_detect'] = frame['frame']
   elif frame['audio_level'] == 0 and frame['zcr'] > 0:
     frame['audio_type'] = 'HARD'
-    frame['audio_detect'] = frame['frame']
-  elif frame['raudio_mean'] < 5:
-    frame['audio_type'] = 'ROS'
     frame['audio_detect'] = frame['frame']
   elif frame['audio_mean'] < 0.1 and frame['audio_mean'] > -0.1 and frame['audio_max'] < 3:
     frame['audio_type'] = 'ZAA'
@@ -286,7 +417,7 @@ def audio_shot_detector(frame,last_frame):
   elif frame['raudio_mean'] < 0.1 and frame['raudio_mean'] > -0.1 and frame['raudio_max'] < 3:
     frame['audio_type'] = 'ZAR'
     frame['audio_detect'] = frame['frame']
-  elif frame['audio_max'] < 2:
+  elif frame['audio_max'] < 2 and frame['rms'] < 10:
     frame['audio_type'] = 'ZDB'
     frame['audio_detect'] = frame['frame']
   elif frame['audio_level'] < 1 and frame['silence'] > 50 and frame['speech_level'] < 0.2:
@@ -319,23 +450,9 @@ def audio_shot_detector(frame,last_frame):
    
   # new detectors 
   if frame['audio_detect'] == frame['frame']:
-    print(frame['frame'],'a\t',frame['audio_type'],' %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['frametime'],frame['audio_max'],frame['audio_mean'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'],frame['speech_level'])
-  elif frame['abd'] > 0.01 and frame['audio_level'] < 20 and frame['speech_level'] < 0.2:
-    if frame['magic'] > 1:
-      print('MAGIC MISS!!!!')
-    print(frame['frame'],frame['magic'],'m\tGRAY\t\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['audio_max'],frame['audio_mean'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'])
-  elif frame['zcr'] > 0.5 and frame['audio_level'] < 10:
-    print(frame['frame'],'m\tZCR\t\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['audio_max'],frame['audio_mean'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'])
-  elif frame['shot_detect'] == frame['frame']: 
-    if frame['magic'] > 1:
-      print('MAGIC MISS!!!!')
-    print(frame['frame'],'m\tMISS\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['audio_max'],frame['audio_mean'],frame['frametime'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'],frame['speech_level'])
-  elif last_frame['audio_detect'] == frame['frame'] - 1:
-    print(frame['frame'],'m\tECHO\t\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['audio_max'],frame['audio_mean'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'])
-  elif frame['audio_mean'] < 0.1 and frame['audio_mean'] > -0.1 and frame['audio_max'] < 10:
-    if frame['magic'] > 1:
-      print('MAGIC MISS!!!!')
-    print(frame['frame'],'S\tSILENT\t\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['audio_max'],frame['audio_mean'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'])
+    print(frame['frame'],'a\t',frame['audio_type'],audio_score,'\t\t%.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['frametime'],frame['audio_max'],frame['audio_mean'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'],frame['speech_level'],frame['rms'],frame['audio_power'])
+  elif (frame['shot_detect'] == frame['frame']) and frame['magic'] > 1: 
+    print(frame['frame'],'m\tMISS\taudio %.3f %.2f :: ' % (frame['abd'],frame['zcr']),frame['audio_max'],frame['audio_mean'],frame['frametime'],'\t',frame['shot_type'],frame['break_count'],frame['silence'],frame['audio_level'],frame['speech_level'],frame['rms'],frame['audio_power'])
 
  
 

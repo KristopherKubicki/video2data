@@ -25,7 +25,8 @@ class CastVideoStream:
 
   def load(self,width,height):
 
-    print("make sure you ran: modprobe v4l2loopback")
+
+    print("make sure you ran: sudo modprobe v4l2loopback")
     self.device = open('/dev/video0', 'wb')
     capability = v4l2.v4l2_capability()
     fmt = v4l2.V4L2_PIX_FMT_YUYV
@@ -38,6 +39,9 @@ class CastVideoStream:
     format.fmt.pix.bytesperline = width * 3
     format.fmt.pix.sizeimage = width * height * 3
     ioctl(self.device, v4l2.VIDIOC_S_FMT, format)
+
+# TODO: Launch ffmpeg command
+
     return self
 
   def cast(self,buf):

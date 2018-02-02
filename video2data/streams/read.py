@@ -7,15 +7,15 @@ import threading
 import multiprocessing
 import subprocess
 import streams.transcribe
-import streams.transcribe
 import queue
 import select
-import time
+import time,datetime
 from fcntl import fcntl, F_GETFL, F_SETFL, ioctl
 import cv2
 import numpy as np
 import re
 import select
+import setproctitle
 
 from streams.detectors import shot
 
@@ -60,6 +60,9 @@ def new_frame(frame_num=0):
   # zeros in the audio frame - a measure of artificial silence
   frame['silence'] = 0
 
+  # is this a super quiet scene or not?
+  frame['isolation'] = False
+
   frame['raudio_max'] = 100
   frame['raudio_mean'] = 100
   frame['audio_max'] = 100
@@ -67,6 +70,15 @@ def new_frame(frame_num=0):
 
   # how much speech is in the frame
   frame['speech_level'] = 0.0
+
+  frame['ssd_rects'] = []
+  frame['human_rects'] = []
+  frame['face_rects'] = []
+  frame['vehicle_rects'] = []
+  frame['object_rects'] = []
+  frame['text_rects'] = []
+  frame['text_hulls'] = []
+
   return frame
 
 #
@@ -121,7 +133,6 @@ class FileVideoStream:
       #
     if self.pipe is not None:
       self.pipe.terminate()
-      #self.pipe.kill()
     if self.video_fifo is not None:
       os.close(self.video_fifo)
     if self.audio_fifo is not None:
@@ -175,10 +186,7 @@ class FileVideoStream:
       fcntl(self.audio_fifo,1031,1048576)
 
       # TODO: move this to os.open()
-      #self.caption_fifo = open('/tmp/%s_caption' % self.name,'rb',4096)
       self.caption_fifo = os.open('/tmp/%s_caption' % self.name,os.O_RDONLY | os.O_NONBLOCK,4096)
-      #flags = fcntl(self.caption_fifo, F_GETFL)
-      #fcntl(self.caption_fifo, F_SETFL, flags | os.O_NONBLOCK)
     #
     # big assumption rtsp stream is h264 of some kind and probably a security camera
     #  it does not handle audio, as the audio not actually in the stream.  Presumably we could mux it here if it exists
@@ -274,6 +282,7 @@ class FileVideoStream:
       os.unlink('/tmp/%s_caption' % self.name)
 
   def load(self,width,height,fps,sample,scale=0.2):
+    setproctitle.setproctitle('v2d main')
     self.scale = scale
     self.width = width
     self.height = height
@@ -289,6 +298,7 @@ class FileVideoStream:
 #  audio goes into a neverending place in memory
   def update(self):
      print("process!",self.stopped.value)
+     setproctitle.setproctitle('v2d reader')
      self.process()
      timeout = 0
      read_frame = 0
@@ -328,8 +338,9 @@ class FileVideoStream:
        if self.caption_fifo and self.caption_poll is not None:
          # doesn't really need to do this on every frame 
          events = self.caption_poll.poll(1)
-         if len(events) > 0 and not events[0][1] & select.POLLIN:
+         if len(events) > 0 and events[0][1] & select.POLLIN:
            raw_subs = os.read(self.caption_fifo,4096)
+           print('raw',raw_subs)
            self.parse_caption(raw_subs)
 
 ###### audio
@@ -368,6 +379,7 @@ class FileVideoStream:
        if data is not None and data.get('audio') is not None and data.get('audio_np') is None:
          data['audio_np'] = np.fromstring(data['audio'],np.int16)
          data['audio_level'] = np.std(data['audio_np'])
+         data['audio_power'] = np.sum(data['audio_np']) / self.sample
          data['audio_max'] = data['audio_np'].max(axis=0)
          data['audio_mean'] = data['audio_np'].mean(axis=0)
          longest = 0
@@ -519,6 +531,10 @@ class FileVideoStream:
                real_break = breaks[0][0]
 
              for buf in new_buf[0:2*window]:
+               # set this frame as the real scene for the block
+               if buf['scene_detect'] == buf['frame'] and buf['scene_detect'] != real_break:
+                 buf['scene_detect'] = real_break
+               # set this frame as the real shot for the block
                buf['shot_detect'] = real_break
                self.Q.put_nowait(buf)
              data_buf = new_buf[2*window:]
