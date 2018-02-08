@@ -58,7 +58,11 @@ def new_frame(frame_num=0):
   # how long has this frame been breaking?
   frame['break_count'] = 0
   # zeros in the audio frame - a measure of artificial silence
-  frame['silence'] = 0
+  frame['zeros'] = 0
+  frame['zcr'] = 0
+  frame['zcrr'] = 0
+  frame['ste'] = 0
+  frame['ster'] = 0
 
   # is this a super quiet scene or not?
   frame['isolation'] = False
@@ -67,6 +71,7 @@ def new_frame(frame_num=0):
   frame['raudio_mean'] = 100
   frame['audio_max'] = 100
   frame['audio_mean'] = 100
+  frame['abd_thresh'] = 0
 
   # how much speech is in the frame
   frame['speech_level'] = 0.0
@@ -162,9 +167,11 @@ class FileVideoStream:
       self.stream = str.replace(self.stream,':','\\\:')
       self.stream = str.replace(self.stream,'@','\\\@')
  
-      video_command = [ 'ffmpeg','-nostdin','-hide_banner','-loglevel','panic','-hwaccel','vdpau','-y','-vsync','1','-f', 'lavfi','-i','movie=%s:s=0\\\:v+1\\\:a[out0+subcc][out1]' % self.stream,'-map','0:v','-vf','blackframe','-vf','blackdetect=d=0.03:pix_th=0.00','-vf','cropdetect=0.01:16:30','-vf','bwdif=0:-1:1','-vf','scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2' % (self.width,self.height,self.width,self.height),'-vsync','cfr','-pix_fmt','bgr24','-r','%f' % self.fps,'-s','%dx%d' % (self.width,self.height),'-vcodec','rawvideo','-f','rawvideo','/tmp/%s_video' % self.name, '-map','0:a','-af','loudnorm=I=-16:TP=-1.5:LRA=11','-ar','%d' % self.sample,'-ac','1','-af','silencedetect=n=-90dB:d=0.0005','-acodec','pcm_s16le','-r','%f' % self.fps,'-f','wav','/tmp/%s_audio' % self.name, '-map','0:s','-f','srt','/tmp/%s_caption' % self.name  ] 
-
-      #print('ffmpeg cmd',' '.join(video_command))
+      video_command = [ '-hide_banner','-loglevel','panic','-hwaccel','vdpau','-y','-f','lavfi','-i','movie=%s:s=0\\\:v+1\\\:a[out0+subcc][out1]' % self.stream,'-map','0:v','-vf','bwdif=0:-1:1,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2' % (self.width,self.height,self.width,self.height),'-pix_fmt','bgr24','-r','%f' % self.fps,'-s','%dx%d' % (self.width,self.height),'-vcodec','rawvideo','-f','rawvideo','/tmp/%s_video' % self.name, '-map','0:a','-acodec','pcm_s16le','-ac','1','-ar','%d' % self.sample,'-f','wav','/tmp/%s_audio' % self.name, '-map','0:s','-f','srt','/tmp/%s_caption' % self.name  ] 
+      if self.seek:
+        video_command[:0] = ['-ss',self.seek]
+      video_command[:0] = ['ffmpeg']
+      print('ffmpeg cmd',' '.join(video_command))
       self.pipe = subprocess.Popen(video_command)
 
       print('Step 2 initializing video /tmp/%s_video' % self.name)
@@ -181,9 +188,10 @@ class FileVideoStream:
       # puny linux default
       #fcntl(self.video_fifo,1031,1048576)
 
-      print('Step 3 initializing video /tmp/%s_video' % self.name)
+      print('Step 3 initializing audio /tmp/%s_audio' % self.name)
       self.audio_fifo = os.open('/tmp/%s_audio' % self.name,os.O_RDONLY | os.O_NONBLOCK,self.sample*2*10)
-      fcntl(self.audio_fifo,1031,1048576)
+      #fcntl(self.audio_fifo,1031,1048576)
+      fcntl(self.audio_fifo,1031,6220800)
 
       # TODO: move this to os.open()
       self.caption_fifo = os.open('/tmp/%s_caption' % self.name,os.O_RDONLY | os.O_NONBLOCK,4096)
@@ -224,11 +232,19 @@ class FileVideoStream:
   def __init__(self, source, queueSize=2048):
 
     self.streams = []
+
+    # TODO: if source has ;##:##:## then seek start time to there
+    self.seek = None
+    if source[-9] == ';':
+      self.seek = source[-8:]
+      source = source[0:-9]
+
     self.stream = source
     self.image = False
     if self.stream.endswith('.jpg') or self.stream.endswith('.png'):
       self.image = True
     self.name = 'input_%d_%d' % (os.getpid(),random.choice(range(1,1000)))
+
 
     self.display = False
     if os.environ.get('DISPLAY'):
@@ -310,7 +326,8 @@ class FileVideoStream:
      last_buf = None
      last_scene = 0
 
-     play_audio = bytearray()
+     last_rms = 100
+     play_audio = None
      raw_audio = bytes()
      raw_image = bytes()
 
@@ -335,20 +352,21 @@ class FileVideoStream:
 
 ###### captions
 #  4096 was kind of chosen at random.  Its a nonblocking read
-       if self.caption_fifo and self.caption_poll is not None:
+       if read_frame % self.fps == 0 and self.caption_fifo and self.caption_poll is not None:
          # doesn't really need to do this on every frame 
          events = self.caption_poll.poll(1)
          if len(events) > 0 and events[0][1] & select.POLLIN:
            raw_subs = os.read(self.caption_fifo,4096)
-           print('raw',raw_subs)
-           self.parse_caption(raw_subs)
-
+           if raw_subs and len(raw_subs) > 0:
+             data['caption_time'],data['caption'] = self.parse_caption(raw_subs)
+ 
 ###### audio
 #  audio is read in, a little bit at a time
        if self.audio_fifo and self.audio_poll is not None and data.get('audio') is None:
          fail = 0
          bufsize = int((self.sample*2/self.fps) - len(raw_audio))
          events = self.audio_poll.poll(1)
+         #print('audio events',events)
          if len(events) > 0 and not events[0][1] & select.POLLIN:
            self.audio_poll.unregister(self.audio_fifo)
            self.audio_poll = None
@@ -377,14 +395,49 @@ class FileVideoStream:
            raw_audio = bytes()
 
        if data is not None and data.get('audio') is not None and data.get('audio_np') is None:
+         #data['audio_np'] = np.fromstring(data['audio'],np.int16)
          data['audio_np'] = np.fromstring(data['audio'],np.int16)
-         data['audio_level'] = np.std(data['audio_np'])
-         data['audio_power'] = np.sum(data['audio_np']) / self.sample
-         data['audio_max'] = data['audio_np'].max(axis=0)
-         data['audio_mean'] = data['audio_np'].mean(axis=0)
+         #data['audio_np'] = data['audio_np'].astype(np.float64)
+
+         if play_audio is None:
+           play_audio = data['audio_np'].copy()
+         else:
+           play_audio = np.concatenate((play_audio,data['audio_np']),axis=0)
+         if(len(play_audio) > self.sample):
+           play_audio = play_audio[int(self.sample / self.fps):]
+
+         # speed up fft by taking a sample
+         mags2 = np.fft.rfft(abs(play_audio[0::100]))
+         mags = np.abs(mags2)
+         amax = max(mags)
+         amin = min(mags)
+         variance = np.var(mags)
+         data['last_abd'] = (amax + amin) / variance
+         data['last_audio'] = play_audio
+         data['last_audio_level'] = np.std(abs(play_audio),axis=0)
+         data['last_audio_power'] = np.sum(abs(play_audio)) / self.sample
+         data['last_rms'] = np.sqrt(np.mean(play_audio**2))
+         data['last_audio_max'] = abs(play_audio).max(axis=0)
+         data['last_audio_mean'] = abs(play_audio).mean(axis=0)
+         #print('last_',data['last_audio_mean'],play_audio_mean,delta)
+
+         # TODO: misnamed
+         data['audio_level'] = np.std(abs(data['audio_np']),axis=0)
+         data['audio_power'] = np.sum(abs(data['audio_np'])) / self.sample
+         #data['rms'] = np.sqrt(np.mean(abs(data['audio_np'])**2))
+         data['rms'] = np.sqrt(np.mean(data['audio_np']**2))
+         data['audio_max'] = abs(data['audio_np']).max(axis=0)
+         data['audio_mean'] = abs(data['audio_np']).mean(axis=0)
+         mags2 = np.fft.rfft(abs(data['audio_np']))
+         mags = np.abs(mags2)
+         amax = max(mags)
+         amin = min(mags)
+         variance = np.var(mags)
+         data['abd'] = (amax + amin) / variance
+
+         # calculate longest continous zero chain
          longest = 0
          last = 0
-               
          for i,e in enumerate(data['audio_np']):
            if e == 0:
              longest += 1
@@ -392,10 +445,10 @@ class FileVideoStream:
                last = longest
              else:
                longest = 0
+         data['zeros'] = last
 
-         data['silence'] = last
          data['speech_level'] = speech_calc(self,data['audio_np'])
-         play_audio += data['audio']
+
          #print('last audio',read_frame)
          if data['speech_level'] > 0.8:
            #print("Talking!",data['speech_level'],read_frame)
@@ -404,15 +457,9 @@ class FileVideoStream:
          else:
            no_talking += 1
            if (no_talking == 10 and len(play_audio) > int(2*self.sample)):
-             #print("Talking Break!", (read_frame - start_talking) / self.fps,len(play_audio))
-
-             # BUG: This can sometimes take forever to run and crash.  There is some bad math in there somewhere
-             #tmp = speech_calc(self,np.frombuffer(play_audio,np.int16))
-             # this needs to be multithreaded
              #print("  Transcribing:",len(play_audio),read_frame,read_frame - start_talking)
              if self.tas and self.tas.transcribe:
                self.tas.transcribe.stdin.write(play_audio)
-             play_audio = bytearray()
              start_talking = 0
 
 ###### video
@@ -452,12 +499,14 @@ class FileVideoStream:
          #  don't do this if we get a null  - its a scene break
          #  TODO: don't do this unless the height and width is changing by a lot
          data['small'] = cv2.resize(data['raw'],(int(data['raw'].shape[:2][1] * self.scale),int(data['raw'].shape[:2][0] * self.scale)))
-         non_empty_columns = np.int0(np.where(data['small'].max(axis=0) > 0)[0] / self.scale)
-         if len(non_empty_columns) > 100 and min(non_empty_columns) > self.height * 0.05 and max(non_empty_columns) < self.height * 0.95:
-           data['rframe'] = data['raw'][0:self.height,min(non_empty_columns):max(non_empty_columns)+1:]
-           data['small'] = cv2.resize(data['rframe'],(int(data['rframe'].shape[:2][1] * self.scale),int(data['rframe'].shape[:2][0] * self.scale)))
-         else:
-           data['rframe'] = data['raw']
+         data['tiny'] = cv2.resize(data['raw'],(8,8))
+         #non_empty_columns = np.int0(np.where(data['small'].max(axis=0) > 0)[0] / self.scale)
+         # TODO: instead of resizing this, mark a flag
+         #if len(non_empty_columns) > 100 and min(non_empty_columns) > self.height * 0.05 and max(non_empty_columns) < self.height * 0.95:
+         #  data['rframe'] = data['raw'][0:self.height,min(non_empty_columns):max(non_empty_columns)+1:]
+         #  data['small'] = cv2.resize(data['rframe'],(int(data['rframe'].shape[:2][1] * self.scale),int(data['rframe'].shape[:2][0] * self.scale)))
+         #else:
+         data['rframe'] = data['raw']
 
          data['height'], data['width'], data['channels'] = data['rframe'].shape
          data['scale'] = self.scale
@@ -492,6 +541,11 @@ class FileVideoStream:
            # buffer this for 30 frames and send them all at the same time
            #  this way we can stitch the audio together 
            window = self.fps
+
+           # TODO: don't do this in the middle of a break, cycle around and do it again
+           # this prevents the buffer from cutting in the middle of a break cluster
+           if read_frame % (2*window) == 0 and read_frame > 0 and data['shot_detect'] > data['frame'] - 5:
+             print('WARNING UPCOMING SPLIT SCENE, PLEASE FIX')
            if read_frame % (2*window) == 0 and read_frame > 0:
              cast_audio = bytes()
              for buf in data_buf[0:2*window]:
@@ -519,9 +573,10 @@ class FileVideoStream:
              real_break = new_buf[0]['shot_detect']
              # pick the oldest frame in a tie
              if len(scenes) > 0:
+               # TODO: only cut on shots. this is a hack for now
                scenes.sort(key=lambda x: x[0],reverse=True)
                scenes.sort(key=lambda x: x[1],reverse=True)
-               print('upcoming scenes',scenes)
+               print(data['frame'],'upcoming scenes',scenes)
                real_break = scenes[0][0]
                last_scene = real_break
              elif len(breaks) > 0:
@@ -529,6 +584,7 @@ class FileVideoStream:
                breaks.sort(key=lambda x: x[1],reverse=True)
                #print('upcoming breaks',breaks)
                real_break = breaks[0][0]
+
 
              for buf in new_buf[0:2*window]:
                # set this frame as the real scene for the block
@@ -543,14 +599,14 @@ class FileVideoStream:
            read_frame += 1
            data = new_frame(read_frame)
            data['last_scene'] = last_scene
-           data['fps'] = self.fps
        elif self.video_fifo or self.image:
          if data.get('rframe') is not None:
            self.microclockbase += 1 / self.fps
            self.Q.put_nowait(data)
            read_frame += 1
            data = new_frame(read_frame)
-           data['fps'] = self.fps
+       data['fps'] = self.fps
+       data['sample'] = self.sample
      
        time.sleep(0.0001)
 
@@ -594,4 +650,8 @@ class FileVideoStream:
           self.caption_guide[last_caption]['scene'] = int(line) - 1
         else:
           self.caption_guide[last_caption]['caption'] += line + ' '
+        print('\t\t[%s] CC: ' % last_caption,line)
+    if last_caption is not '':
+      return last_caption,self.caption_guide[last_caption]['caption']
+    return last_caption,''
 

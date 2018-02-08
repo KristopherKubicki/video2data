@@ -4,10 +4,10 @@
 #
 
 FPS = 30
-#WIDTH = 1280
-#HEIGHT = 720
-WIDTH = 1280
-HEIGHT = 720
+WIDTH = 1920
+HEIGHT = 1080
+WIDTH = 800
+HEIGHT = 450
 SAMPLE = 44100
 SCALER = 0.2
 
@@ -204,21 +204,7 @@ if 1==1:
             if data['frame'] > 1:
               sound1 = pygame.mixer.Sound(play_audio)
               channel1.queue(sound1)
-      
-          frametime = datetime.datetime.utcnow().utcfromtimestamp(frame / fvs.fps).strftime('%H:%M:%S')
-          filetime = datetime.datetime.utcnow().utcfromtimestamp(fvs.microclockbase + fvs.clockbase).strftime('%H:%M:%S')
-          local_fps = fps_frame / (time.time() - start_time)
-          if caption_end == frametime:
-            frame_caption = ''
-            caption_end = ''
-          if fvs.caption_guide.get(frametime):
-            frame_caption = fvs.caption_guide[frametime]['caption']
-            caption_end = fvs.caption_guide[frametime]['stop']
-            if frame_caption is not last_caption:
-              # sometimes captions get duplicated (truncated, appended to the previous caption).  It's a function of the transcriber.  
-              #  see if we can filter those out
-              last_caption = frame_caption
-          
+
           start = time.time()
           waitkey = realtime.smoothWait(fvs)
           fvs.ff = False
@@ -227,6 +213,21 @@ if 1==1:
           data['show'] = data['rframe'].copy()
           data['frame'] = frame
           data['frametime'] = datetime.datetime.utcnow().utcfromtimestamp(frame / fvs.fps).strftime('%H:%M:%S,%f')[:-3]
+          local_fps = fps_frame / (time.time() - start_time)
+      
+          if data.get('caption'):
+            # sometimes captions get duplicated (truncated, appended to the previous caption).  It's a function of the transcriber.  
+            #  see if we can filter those out
+            tmp_caption = ''
+            for i in reversed(range(3,len(data['caption']))):
+              if frame_caption[-i:] == data['caption'][0:i]:
+                 tmp_caption = data['caption'][i:]
+                 break
+            if tmp_caption is '':
+              tmp_caption = data['caption']
+            frame_caption = data['caption']
+            #print('\t\t[%s] CC: %s' % (data['caption_time'],tmp_caption))
+          
 
 # TODO:
 #  move to DA contrib 
@@ -236,8 +237,6 @@ if 1==1:
 
           if last_frame and last_frame['text_hulls']:
             data['text_hulls'] = last_frame['text_hulls']
-          if data['frame'] % 1000 == 0 and data['frame'] > 1:
-           print('\t\t',data['frametime'],' ',data['frame'],'%.2f' % (data['frame'] / (time.time() - bstart)))
           
           if data.get('transcribe'):
             last_transcribe = frame
@@ -258,7 +257,6 @@ if 1==1:
             prev_shot['shottime'] = datetime.datetime.utcnow().utcfromtimestamp((prev_shot['start']) / data['fps']).strftime('%H:%M:%S,%f')[:-3]
             prev_shot['length'] = float((prev_shot['end'] - prev_shot['start']) / FPS)
             log.shot_recap(prev_shot)
-            #cv2.imshow('cur_frame',data['small'])
 
           if frame % 60 == 0:
             start_time = time.time()
@@ -283,7 +281,6 @@ if 1==1:
 #            prev_scene['type'] = data['com_detect']
             log.scene_recap(prev_scene)
 
-            print('write out')
             prev_prev_scene = prev_scene
             prev_scene = v2dvar.new_scene(frame)
             prev_shot = v2dvar.new_shot(frame)
@@ -297,21 +294,24 @@ if 1==1:
           if prev_prev_scene['opening'] is not None:
             y = data['small'].shape[0]
             x = data['small'].shape[1]
-            data['show'][data['height']-y-20:data['height']-20,20:x+20] = prev_prev_scene['opening'].copy()
+            if x+20 < data['show'].shape[1]:
+              data['show'][data['height']-y-20:data['height']-20,20:x+20] = prev_prev_scene['opening'].copy()
           if prev_prev_scene['closing'] is not None:
             y = data['small'].shape[0]
             x = data['small'].shape[1]
-            data['show'][data['height']-y-20:data['height']-20,x+40:2*x+40] = prev_prev_scene['closing'].copy()
+            if 2*x+40 < data['show'].shape[1]:
+              data['show'][data['height']-y-20:data['height']-20,x+40:2*x+40] = prev_prev_scene['closing'].copy()
 
           if prev_scene['opening'] is not None:
             y = data['small'].shape[0]
             x = data['small'].shape[1]
-            data['show'][data['height']-y-20:data['height']-20,2*x+60:3*x+60] = prev_scene['opening'].copy()
+            if 3*x+60 < data['show'].shape[1]:
+              data['show'][data['height']-y-20:data['height']-20,2*x+60:3*x+60] = prev_scene['opening'].copy()
           if prev_scene['closing'] is not None:
             y = data['small'].shape[0]
             x = data['small'].shape[1]
-            data['show'][data['height']-y-20:data['height']-20,3*x+80:4*x+80] = prev_scene['closing'].copy()
-            #cv2.imshow('last_frame',prev_shot['last_frame'])
+            if 4*x+80 < data['show'].shape[1]:
+              data['show'][data['height']-y-20:data['height']-20,3*x+80:4*x+80] = prev_scene['closing'].copy()
 
           if data.get('shot_detect') == frame:
             prev_shot = v2dvar.new_shot(frame)
@@ -327,7 +327,7 @@ if 1==1:
             for rect in oi_rects:
               if rect[1] > 0.8:
                 prev_scene['stuff'].append(rect[2])
-            for rect in ssd_rects:
+            for rect in data['ssd_rects']:
               if rect[1] > 0.8:
                 prev_scene['stuff'].append(rect[2])
             for rect in kitti_rects:
@@ -338,7 +338,7 @@ if 1==1:
                 prev_scene['vehicles'].append(rect[2])
             # reset all the OCR if we change shot
             for pipe in tmp_pipes:
-              pipe[0].close()
+              pipe[0].kill()
             tmp_pipes = []
             face_rects = []
             face_hulls = []
@@ -436,8 +436,11 @@ if 1==1:
             #  the SSD module is generally faster than the motion tracker
             people_tracker = cv2.MultiTracker_create()
             kitti_tracker = cv2.MultiTracker_create()
-
             data = ssd.run(data,last_frame)
+          elif frame != data['shot_detect'] and last_frame:
+            data['human_rects'] = last_frame['human_rects']
+            data['ssd_rects'] = last_frame['ssd_rects']
+            data['vehicle_rects'] = last_frame['vehicle_rects']
 
             
 ########
@@ -559,7 +562,7 @@ if 1==1:
           #if len(oi_rects) > 0 and (frame == shot_detect+37 or fvs.image or (frame > shot_detect + 173 and frame % 173 == 0)):
           #if len(oi_rects) > 0 and (frame == shot_detect+4 or fvs.image):
           # consider launching this as a process, and then joining on it later 
-          if False and (data.get('shot_detect') and frame == data.get('shot_detect')+4) or fvs.image:
+          if (data.get('shot_detect') and frame == data.get('shot_detect')+4) or fvs.image:
             tstart = time.time()
 
             include_labels = []
@@ -584,7 +587,7 @@ if 1==1:
                 include_labels.extend(rect[2].split())
             #    print('oi_rect',i,rect[1],rect[2])
             else:
-              for i, rect in enumerate(ssd_rects):
+              for i, rect in enumerate(data['ssd_rects']):
                 include_labels.extend(rect[2].split())
 
             if 'cell phone' not in include_labels:
@@ -736,10 +739,6 @@ if 1==1:
           #print("output_6",time.time() - start)
 
 
-#
-# TODO: Figure out some scheme for non max supression 
-#  https://www.pyimagesearch.com/2015/11/09/pedestrian-detection-opencv/
-#
           if len(logo_rects) > 0:
             for rect in logo_rects:
               label = "%s: %d" % (rect[2],int(rect[1]*100))
@@ -747,8 +746,8 @@ if 1==1:
               cv2.rectangle(data['show'], (rect[0][0], rect[0][1]+text_size[1]+10), (rect[0][0]+text_size[0]+10, rect[0][1]), (255,0,0), cv2.FILLED)
               cv2.putText(data['show'], label ,(rect[0][0]+5, rect[0][1]+text_size[1]+5),cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 
-          if len(ssd_rects) > 0:
-            for rect in ssd_rects:
+          if len(data['ssd_rects']) > 0:
+            for rect in data['ssd_rects']:
               if rect[1] < 0.6 and frame < rect[3] + 10:
                 break
               if rect[1] < 0.5 and frame < rect[3] + 20:
@@ -774,7 +773,7 @@ if 1==1:
                   #krect[2] = rect[2].title() +' '+ krect[2].rsplit(None, 1)[-1]
                   written = True
 
-              for srect in ssd_rects:
+              for srect in data['ssd_rects']:
                 if rect == srect:
                   continue
 
@@ -929,8 +928,7 @@ if 1==1:
 
           setLabel(data['show'], "FBUF: %d (%dms)" % (fvs.Q.qsize(),waitkey),115)
           setLabel(data['show'], "FRAM: %d (%.3ffps)" % (data['frame'],fps_frame / (time.time() - start_time)),135)
-          setLabel(data['show'], "REAL: %s" % filetime,155)
-          setLabel(data['show'], "VIEW: %s" % frametime,175)
+          setLabel(data['show'], "VIEW: %s" % data['frametime'],175)
           setLabel(data['show'], "SBD: %.2f" % data['sbd'],195)
           if data['shot_detect'] > data['frame']:
             setLabel(data['show'], "NEXT: %d" % (int(data['shot_detect']) - int(data['frame'])),215)
@@ -1000,7 +998,7 @@ if 1==1:
           if fvs.stream[:4] == 'rtsp' and frame > 1500:
             fvs.stop()
             break
-          elif frame > 10000:
+          elif frame > 1000000:
             fvs.stop()
             break
 

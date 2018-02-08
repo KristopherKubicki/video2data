@@ -46,11 +46,6 @@ class nnSSD:
     old_human_rects = []
     if last_frame and last_frame.get('human_rects'):
       old_human_rects = last_frame.get('human_rects')
-    frame['human_rects'] = []
-
-    # TODO: check vehicle and ssd rects the same way we check human rects
-    frame['vehicle_rects'] = []
-    frame['ssd_rects'] = []
 
     # TODO pythonify
     i = 0
@@ -58,7 +53,7 @@ class nnSSD:
     # carry over label and frame from previous detection
       detected_frame = frame['frame']
       detected_label = ''
-      if self.ccategory_index[cclasses[0][i]]['name'] in ['person','face']:
+      if self.ccategory_index[self.cclasses[0][i]]['name'] in ['person','face']:
         rect_center = v2dimage.rectCenter(v2dimage.scaleRect(v2dimage.shiftRect(cboxes[0][i]),frame['width'],frame['height']))
         for prect in old_human_rects:
           if prect[0][0] < rect_center[0] < prect[0][2] and prect[0][1] < rect_center[1] < prect[0][3]:
@@ -76,10 +71,10 @@ class nnSSD:
         continue
       if w*h > 0.6 and cscore < 0.7:
         continue
-      #print('\t\tssd',ccategory_index[cclasses[0][i]]['name'],w*h,cscore)
 
       # TODO: Don't let humans be in the corners of the screen. Detection is at its worst there
-      if self.ccategory_index[cclasses[0][i]]['name'] in ['person','face']:
+      #print('sscores',i,cscore,self.ccategory_index[cclasses[0][i]]['name'])
+      if self.ccategory_index[self.cclasses[0][i]]['name'] in ['person','face']:
         # enable human tracking here
         # TODO: Don't let human be in the corners of the screen. Detection is at its worst there
         #  don't have to dlib on every frame, especially if we already have a label
@@ -96,30 +91,33 @@ class nnSSD:
             tmp = frame['rframe'][tmpRect[1]:tmpRect[3],tmpRect[0]:tmpRect[2]:]
 
           # TODO: enable this
-          continue
-          dets = faces.detector(tmp,1)
-          tmp_gray = cv2.cvtColor(tmp,cv2.COLOR_BGR2GRAY)
-          for k, d in enumerate(dets):
-            shape = faces.predictor(tmp_gray,d)
-            face_descriptor = faces.facerec.compute_face_descriptor(tmp, shape)
-            all_faces.append(face_descriptor)
-            labels = dlib.chinese_whispers_clustering(all_faces, 0.5)
-            frame['faces'].append(base64.b64encode(np.squeeze(labels[-1])).decode('utf-8')[:-2])
-            detected_label = 'CELEB: ' + base64.b64encode(np.squeeze(labels[-1])).decode('utf-8')[:-2]
-            cscore += 0.5
-            break
-          # TODO: No face?  Maybe hurt the human score!
-          if len(dets) == 0 and cscore < 0.4:
-            cscore -= 0.2
-        human_rects.append([v2dimage.scaleRect(v2dimage.shiftRect(cboxes[0][i]),frame['width'],frame['height']),cscore,detected_label,detected_frame])
+          #continue
+          #dets = faces.detector(tmp,1)
+          #tmp_gray = cv2.cvtColor(tmp,cv2.COLOR_BGR2GRAY)
+          #for k, d in enumerate(dets):
+          #  shape = faces.predictor(tmp_gray,d)
+          #  face_descriptor = faces.facerec.compute_face_descriptor(tmp, shape)
+          #  all_faces.append(face_descriptor)
+          #  labels = dlib.chinese_whispers_clustering(all_faces, 0.5)
+          #  frame['faces'].append(base64.b64encode(np.squeeze(labels[-1])).decode('utf-8')[:-2])
+          #  detected_label = 'CELEB: ' + base64.b64encode(np.squeeze(labels[-1])).decode('utf-8')[:-2]
+          #  cscore += 0.5
+          #  break
+          ## TODO: No face?  Maybe hurt the human score!
+          #if len(dets) == 0 and cscore < 0.4:
+          #  cscore -= 0.2
+        print('sscores',i,cscore,self.ccategory_index[self.cclasses[0][i]]['name'])
+        frame['human_rects'].append([v2dimage.scaleRect(v2dimage.shiftRect(cboxes[0][i]),frame['width'],frame['height']),cscore,detected_label,detected_frame])
         #ok = people_tracker.add(cv2.TrackerKCF_create(),frame['small'],v2dimage.scaleRect(v2dimage.shiftRect(cboxes[0][i]),frame['width']*SCALER,frame['height']*SCALER))
-      elif self.ccategory_index[cclasses[0][i]]['name'] in ['car','bus','truck','vehicle','boat','airplane']:
+      elif self.ccategory_index[self.cclasses[0][i]]['name'] in ['car','bus','truck','vehicle','boat','airplane']:
         if cscore < 0.3:
           continue
         #print('\t\tcar',ccategory_index[cclasses[0][i]]['name'],w*h,cscore)
+        print('cscores',i,cscore,self.ccategory_index[cclasses[0][i]]['name'])
         frame['vehicle_rects'].append([v2dimage.scaleRect(v2dimage.shiftRect(cboxes[0][i]),frame['width'],frame['height']),cscore,self.ccategory_index[cclasses[0][i]]['name'],detected_frame])
         #      ok = kitti_tracker.add(cv2.TrackerKCF_create(),frame['gray'],v2dimage.scaleRect(v2dimage.shiftRect(cboxes[0][i]),frame['width']*SCALER,frame['height']*SCALER))
       elif cscore > 0.7:
+        print('ssd cscores',i,cscore,self.ccategory_index[cclasses[0][i]]['name'])
         frame['ssd_rects'].append([v2dimage.scaleRect(v2dimage.shiftRect(cboxes[0][i]),frame['width'],frame['height']),cscore,self.ccategory_index[cclasses[0][i]]['name'],detected_frame])
       i += 1
 
