@@ -49,7 +49,10 @@ def scene_recap(prev_scene):
   if prev_scene['end'] == prev_scene['start']:
     return
 
-  print('[%s] Title: Unnamed %s' % (prev_scene['scenetime'],prev_scene.get('com_detect')))
+  if prev_scene['title'] is not '':
+    print('[%s] Title: %s' % (prev_scene['scenetime'],prev_scene.get('title')))
+  else:
+    print('[%s] Title: Unnamed %s' % (prev_scene['scenetime'],prev_scene.get('com_detect')))
   print('[%s] Length: %.02fs, %d frames' % (scenetime,prev_scene['length'],prev_scene['end'] - prev_scene['start']))
   print('[%s] Detect Method: %s ' % (scenetime,prev_scene['break_type']))  
   print('[%s] Signature: %s' % (scenetime,v2dsig.phash_bits(prev_scene['shotprint'])))

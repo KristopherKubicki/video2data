@@ -19,6 +19,8 @@ def new_scene(frame_num=0):
   prev_scene['stuff'] = []
   prev_scene['objects'] = []
   prev_scene['break_type'] = ''
+  prev_scene['play_audio'] = bytes()
+  prev_scene['title'] = ''
   return prev_scene
 
 def new_shot(frame_num=0):
@@ -40,5 +42,7 @@ def new_shot(frame_num=0):
   prev_shot['faceprint'] = '0b'
   prev_shot['summary'] = ''
   prev_shot['break_type'] = ''
+  prev_shot['play_audio'] = bytes()
+  prev_shot['title'] = ''
   return prev_shot
 

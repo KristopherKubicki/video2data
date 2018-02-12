@@ -72,6 +72,7 @@ def new_frame(frame_num=0):
   frame['audio_max'] = 100
   frame['audio_mean'] = 100
   frame['abd_thresh'] = 0
+  frame['ster_thresh'] = 0
 
   # how much speech is in the frame
   frame['speech_level'] = 0.0
@@ -326,6 +327,8 @@ class FileVideoStream:
      last_buf = None
      last_scene = 0
 
+     rolling_ste = []
+
      last_rms = 100
      play_audio = None
      raw_audio = bytes()
@@ -347,7 +350,6 @@ class FileVideoStream:
          continue
          
        if self.audio_poll is None and self.video_poll is None and self.image is False:
-         print('done')
          break
 
 ###### captions
@@ -395,9 +397,7 @@ class FileVideoStream:
            raw_audio = bytes()
 
        if data is not None and data.get('audio') is not None and data.get('audio_np') is None:
-         #data['audio_np'] = np.fromstring(data['audio'],np.int16)
          data['audio_np'] = np.fromstring(data['audio'],np.int16)
-         #data['audio_np'] = data['audio_np'].astype(np.float64)
 
          if play_audio is None:
            play_audio = data['audio_np'].copy()
@@ -416,24 +416,55 @@ class FileVideoStream:
          data['last_audio'] = play_audio
          data['last_audio_level'] = np.std(abs(play_audio),axis=0)
          data['last_audio_power'] = np.sum(abs(play_audio)) / self.sample
-         data['last_rms'] = np.sqrt(np.mean(play_audio**2))
+         local_max2 = np.max(play_audio)
+         local_max = np.max(play_audio**2)
+         local_mean = np.mean(play_audio**2)
+         #print('max',local_max2,local_mean)
+         # TODO: fix issues with negative sqrts
+         data['last_rms'] = np.sqrt(local_mean)
          data['last_audio_max'] = abs(play_audio).max(axis=0)
          data['last_audio_mean'] = abs(play_audio).mean(axis=0)
+         last = data['last_audio'][0::1000]
+         # WARNING: compute intensive
+         data['last_ste'] = sum( [ abs(x)**2 for x in last ] ) / len(last)
+         #print('last_',data['frame'],data['last_ste'])
          #print('last_',data['last_audio_mean'],play_audio_mean,delta)
 
          # TODO: misnamed
          data['audio_level'] = np.std(abs(data['audio_np']),axis=0)
          data['audio_power'] = np.sum(abs(data['audio_np'])) / self.sample
-         #data['rms'] = np.sqrt(np.mean(abs(data['audio_np'])**2))
-         data['rms'] = np.sqrt(np.mean(data['audio_np']**2))
+         local_mean = np.mean(data['audio_np']**2)
+         # TODO: fix issues with negative sqrts
+         data['rms'] = np.sqrt(local_mean)
          data['audio_max'] = abs(data['audio_np']).max(axis=0)
          data['audio_mean'] = abs(data['audio_np']).mean(axis=0)
+
+         # WARNING: compute intensive 
+         data['ste'] = sum( [ abs(x)**2 for x in data['audio_np'][0::100] ] ) / len(data['audio_np'][0:100])
          mags2 = np.fft.rfft(abs(data['audio_np']))
          mags = np.abs(mags2)
          amax = max(mags)
          amin = min(mags)
          variance = np.var(mags)
          data['abd'] = (amax + amin) / variance
+
+         signs = np.sign(data['audio_np'])
+         signs[signs == 0] = -1
+         data['zcr'] = len(np.where(np.diff(signs))[0])/len(data['audio_np']) + 0.0001 
+
+         signs = np.sign(data['last_audio'])
+         signs[signs == 0] = -1
+         data['last_zcr'] = len(np.where(np.diff(signs))[0])/len(data['last_audio']) + 0.0001
+
+         data['ster'] = data['last_ste'] / data['ste']
+# it might make sense to reset this on scene breaks
+         rolling_ste.append(data['ster'])
+         if len(rolling_ste) > self.fps * 10:
+           rolling_ste.pop(0)
+         data['mean_ste'] = np.mean(rolling_ste)
+         data['pwrr'] = data['audio_power'] / data['last_audio_power']
+         data['zcrr'] = data['last_zcr'] / data['zcr']
+
 
          # calculate longest continous zero chain
          longest = 0
@@ -524,6 +555,10 @@ class FileVideoStream:
          data['contrast'] = -1 * (hist*logs).sum()
          #print('last video',read_frame)
 
+         data['original'] = data['rframe'].copy()
+         data['show'] = data['rframe'].copy()
+
+
 
 ###### transcription
        if self.tas and self.tas.transcribe and self.tas.transcribe.stdout:
@@ -544,6 +579,7 @@ class FileVideoStream:
 
            # TODO: don't do this in the middle of a break, cycle around and do it again
            # this prevents the buffer from cutting in the middle of a break cluster
+           #  NOTE: defect might be on the other side -- i.e., the :2 cuts the break in half
            if read_frame % (2*window) == 0 and read_frame > 0 and data['shot_detect'] > data['frame'] - 5:
              print('WARNING UPCOMING SPLIT SCENE, PLEASE FIX')
            if read_frame % (2*window) == 0 and read_frame > 0:
@@ -560,11 +596,13 @@ class FileVideoStream:
              scenes = []
              data_buf.append(data)
              for buf in data_buf:
+               # TODO: calculate scene energy and hand it to the next window
+               #  that way we can determine pitch changes
                if last_buf is not None and buf['sbd'] == 0.0:
                  buf = shot.frame_to_contours(buf,last_buf)
                  buf = shot.frame_to_shots(buf,last_buf)
                if buf['scene_detect'] == buf['frame']:
-                 scenes.append((buf['frame'],buf['sbd']))
+                 scenes.append((buf['shot_detect'],buf['sbd']))
                if buf['shot_detect'] == buf['frame']:
                  breaks.append((buf['frame'],buf['sbd']))
                last_buf = buf
@@ -579,17 +617,21 @@ class FileVideoStream:
                print(data['frame'],'upcoming scenes',scenes)
                real_break = scenes[0][0]
                last_scene = real_break
+               print("RESETTING STE COUNTER")
+               rolling_ste = []
+               play_audio = None
+               data['ster_thresh'] *= 0.1
+               data['abd_thresh'] *= 0.1
              elif len(breaks) > 0:
                breaks.sort(key=lambda x: x[0],reverse=True)
                breaks.sort(key=lambda x: x[1],reverse=True)
                #print('upcoming breaks',breaks)
                real_break = breaks[0][0]
 
-
              for buf in new_buf[0:2*window]:
                # set this frame as the real scene for the block
-               if buf['scene_detect'] == buf['frame'] and buf['scene_detect'] != real_break:
-                 buf['scene_detect'] = real_break
+               if buf['scene_detect'] != last_scene:
+                 buf['scene_detect'] = last_scene
                # set this frame as the real shot for the block
                buf['shot_detect'] = real_break
                self.Q.put_nowait(buf)
@@ -649,7 +691,9 @@ class FileVideoStream:
         if line.isdigit():
           self.caption_guide[last_caption]['scene'] = int(line) - 1
         else:
+          # TODO: remove duplicates
           self.caption_guide[last_caption]['caption'] += line + ' '
+        # TODO: HACK. this belongs in the logger
         print('\t\t[%s] CC: ' % last_caption,line)
     if last_caption is not '':
       return last_caption,self.caption_guide[last_caption]['caption']

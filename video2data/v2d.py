@@ -26,10 +26,13 @@ import streams.read
 # Load up the sources 
 sources = [line.rstrip('\n') for line in open('sources.txt')]
 
+import queue
+import threading
+
 # 3.4.0
 import cv2
 import numpy as np
-
+import wave
 
 image_np = cv2.imread("data/test.png")
 image_np_expanded = np.expand_dims(image_np, axis=0)
@@ -86,8 +89,6 @@ import re
 # encode 128D vectors for facial fingerprints
 import base64
 
-import titlecase
-
 # I want to set a dict with a key value without initializing the key
 from collections import defaultdict
 
@@ -129,6 +130,14 @@ def setLabel(im, label, y):
   cv2.rectangle(im, (10, y - text_size[1] - 5), (10 + text_size[0], y + 5), (0,0,0), cv2.FILLED)
   cv2.putText(im, label ,(10, y),fontface, scale, (0, 255, 0), thickness)
 
+def parse_audfprint(line):
+  clean = line.rstrip().decode('ascii', errors='ignore')
+  prev_lookup = {}
+  for line in clean.splitlines(): 
+    mo = re.search("raw hashes as .+?([^\/]+?)-360-.+?.mp4",line)
+    if mo and mo.group():
+      prev_lookup['name'] = mo.group(1).replace('-',' ').title()
+  return prev_lookup
   
 if 1==1:
   if 1==1:
@@ -167,6 +176,7 @@ if 1==1:
         channel1 = pygame.mixer.Channel(0)
 
         tmp_pipes = []
+        audfprint_queues = []
 
         logo_rects = []
         oi_rects = []
@@ -197,6 +207,7 @@ if 1==1:
           data = fvs.read()
 
 # play the audio
+# TODO: rename cast_audio 
           if fvs.display and data.get('play_audio') is not None:    
             last_play_audio = data['play_audio']
             play_audio = pygame.mixer.Sound(data.get('play_audio'))
@@ -204,13 +215,44 @@ if 1==1:
             if data['frame'] > 1:
               sound1 = pygame.mixer.Sound(play_audio)
               channel1.queue(sound1)
+            prev_scene['play_audio'] += data['play_audio']
 
+#  TODO: Move this to contrib deepad
+# Audio fingerprinting
+#  drop the wav file down to the ramdrive, background audfprint 
+#         
+            if len(audfprint_queues) > 0:
+              for q in audfprint_queues:
+                if q.poll() is not None:
+                  tmp = parse_audfprint(q.stdout.read())
+                  if tmp.get('name'):
+                    print('\t\tDetected Stored Clip: ',tmp.get('name'))
+                    # TODO: detect where in the clip we are, and determine where the end of this clip
+                    #  will be 
+                    prev_scene['title'] = tmp.get('name')
+                  audfprint_queues.pop(0)
+                else:
+                  break
+
+# TODO: only run this if we don't already know the scene
+            if len(prev_scene['play_audio']) > fvs.sample*6 and len(audfprint_queues) < 4 and prev_scene['title'] is '':
+              ww = wave.open('/dev/shm/out.wav','wb')
+              # one channel
+              ww.setnchannels(1)
+              ww.setframerate(fvs.sample)
+              ww.setsampwidth(2)
+              # only send the last 10 seconds of audio back in
+              #  any more would be kind of a waste.  10 sec even seems like a lot
+              ww.writeframes(prev_scene['play_audio'][-fvs.sample*2*5:])
+              ww.close()
+              # FIXME: race condition on out.wav
+              p = subprocess.Popen(['/home/kristopher/audfprint/audfprint.py','match','--dbase','/home/kristopher/audfprint/fpdbase.pklz','/dev/shm/out.wav'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+              audfprint_queues.append(p)
+                
           start = time.time()
           waitkey = realtime.smoothWait(fvs)
           fvs.ff = False
 
-          data['original'] = data['rframe'].copy()
-          data['show'] = data['rframe'].copy()
           data['frame'] = frame
           data['frametime'] = datetime.datetime.utcnow().utcfromtimestamp(frame / fvs.fps).strftime('%H:%M:%S,%f')[:-3]
           local_fps = fps_frame / (time.time() - start_time)
@@ -265,6 +307,7 @@ if 1==1:
 #  SCENE BREAK DETECTOR
 # 
           if data.get('scene_detect') == frame and last_frame is not None:
+            audfprint_queues = []
             data['scene_detect'] = frame
             if prev_scene['closing'] is None:
               prev_scene['closing'] = last_frame['small']
@@ -859,13 +902,17 @@ if 1==1:
 
 ##########
 #  subpocess harvestor 
-#
+# 
+          
+ 
           busy_pipes = []
           for pipe in tmp_pipes:
+            # 1ms per poll() ...
+            # TODO: shouldnt this be "is None" ???
             if pipe[0].poll() is not None:
               busy_pipes.append(pipe)
               continue
-
+ 
             # see if this is ready for reading first.  If so, then read it
             # otherwise skip it and come back later
             tmp_data = pipe[0].stdout.read()
@@ -934,6 +981,9 @@ if 1==1:
             setLabel(data['show'], "NEXT: %d" % (int(data['shot_detect']) - int(data['frame'])),215)
           if data['scene_detect'] > data['frame']:
             setLabel(data['show'], "SCENE: %d" % (int(data['shot_detect']) - int(data['frame'])),235)
+          if prev_scene['title'] is not '':
+            setLabel(data['show'], "COMM: %s" % (prev_scene['title']),255)
+# 
 # 
 # 
 #  Letterbox and pillarbox the image before displaying it

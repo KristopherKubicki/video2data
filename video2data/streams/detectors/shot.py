@@ -14,9 +14,26 @@ def frame_to_contours(frame,last_frame):
   if frame is None or last_frame is None:
     return frame
 
+  # line detection with houghlines is too expensive.  we have to do the canny and the hough,
+  #  both which we don't really need or want to do
+  #  instead, naively check for rows that are the same color
+  #  NOTE: this adds a few ms on the grayscale version.  its currently disabled 
+  #tmp = frame['rframe']
+  #tmp = cv2.Canny(tmp,100,1)
+  #lines = cv2.HoughLinesP(tmp,1,np.pi/2,threshold=1,minLineLength=150,maxLineGap=3)
+  # push horizontal bars into array, and detect when those bars transit shots or scenes
+  #if lines is not None and len(lines):
+  #  for x in range(0, len(lines)):
+  #    for x1,y1,x2,y2 in lines[x]:
+  #      if y1 == y2 and x2 - x1 > frame['width'] * 0.5:
+  #        cv2.line(frame['show'],(0,y1),(frame['width'],y1),(0,255,0),2)
+  #      elif x1 == x2 and y2 - y2 > frame['height'] * 0.5:
+  #        cv2.line(frame['show'],(x1,0),(x1,frame['height']),(0,255,0),2)
+
   # TODO: detect disolves (contrast delta)
   #  blurs are also a way to get at that
   if last_frame.get('gray') is not None and frame.get('gray') is not None and last_frame.get('gray').shape == frame.get('gray').shape:
+    # estimated gmm.  if necessary, do the slower calculation
     frame['gray_motion_mean'] = cv2.norm(last_frame['gray'], frame['gray'],cv2.NORM_L1) / float(frame['gray'].shape[0] * frame['gray'].shape[1])
     
     if frame['gray_motion_mean'] > 1:
@@ -27,11 +44,6 @@ def frame_to_contours(frame,last_frame):
       frame['gray_motion_mean'] = np.sum(thresh) / float(thresh.shape[0] * thresh.shape[1])
       motion_cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)[1]
       frame['motion_hulls'] = [cv2.convexHull(p.reshape(-1, 1, 2) * int(1/frame['scale'])) for p in motion_cnts]
-    
-    # potentially compute intensive
-    #tmp = cv2.Canny(frame['gray'],10,200)
-    #frame['edges'] = cv2.findContours(tmp.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)[1]
-    #cv2.imshow('edges',tmp)
   return frame
 
 def frame_to_shots(frame,last_frame):
@@ -75,8 +87,8 @@ def frame_to_shots(frame,last_frame):
     frame = video_shot_detector(frame,last_frame)
 
 # run the audio detector again if we believe we have a shot
-  if frame['shot_detect'] == frame['frame'] and frame.get('audio') and frame.get('audio_type') is None:
-    frame = audio_shot_detector(frame,last_frame)
+  #if frame['shot_detect'] == frame['frame'] and frame.get('audio') and frame.get('audio_type') is None:
+  #  frame = audio_shot_detector(frame,last_frame)
 
   frame['break_type'] = '%s%s%d' % (frame['audio_type'],frame['shot_type'],frame['break_count'])
 
@@ -110,10 +122,10 @@ def frame_to_shots(frame,last_frame):
     #print('WV SCENE',frame['frametime'],frame['frame'],'\t',frame['break_type'])
     frame['scene_detect'] = frame['frame']
     frame['sbd'] *= 1.2
-  elif frame['shot_detect'] == frame['frame'] and frame['magic'] > 2 and frame['shot_type'] == 'BLANK':
-    #print('warning! magic blank shot!',frame['frame'],frame['audio_level'],frame['audio_max'])
-    frame['scene_detect'] = frame['frame']
-    frame['sbd'] *= 1.0
+  #elif frame['shot_detect'] == frame['frame'] and frame['magic'] > 2 and frame['shot_type'] == 'BLANK':
+  #  print('warning! magic blank shot!',frame['frame'],frame['audio_level'],frame['audio_max'])
+  #  frame['scene_detect'] = frame['frame']
+  #  frame['sbd'] *= 1.0
 
   # sometimes a scene will cut twice in rapid succession.  Give this an opportunity to trigger but
   #  not less than 1 second after it already cut
@@ -242,83 +254,32 @@ def video_shot_detector(frame,last_frame):
 
 def audio_shot_detector(frame,last_frame):
 
-  # broadcasters always go all the way to zero between shots.  Sometimes its for a very
-  #  short time though. This works out to be about 15ms, with the windows being 1ms apart
-  # TODO: Only do this if speech levels are low?
-  #if frame['speech_level'] < 0.2:
-  #
-  # Audio between commercials tends to look like this
-  #  #     #  #
-  #  ##   #####
-  #  ## # #####
-  #  ##########
-  #    ^ ^
-  #  this feature is unique and pretty easy to spot.  
-  #  sometimes its just a single trough
-  #
-  signs = np.sign(frame['audio_np'])
-  signs[signs == 0] = -1
-  frame['zcr'] = len(np.where(np.diff(signs))[0])/len(frame['audio_np']) + 0.0001
-
-  signs = np.sign(frame['last_audio'])
-  signs[signs == 0] = -1
-  frame['last_zcr'] = len(np.where(np.diff(signs))[0])/len(frame['last_audio']) + 0.0001
-
-  frame['ste'] = sum( [ abs(x)**2 for x in frame['audio_np'] ] ) / len(frame['audio_np'])
-  last = frame['last_audio'][1::100]
-  frame['last_ste'] = sum( [ abs(x)**2 for x in last ] ) / len(last)
-
-
-  frame['rms'] = np.sqrt(np.mean(frame['audio_np']**2))
-  frame['ster'] = frame['last_ste'] / frame['ste']
   frame['sterr'] = last_frame['ster'] / (frame['ster'] + 0.0001)
-  frame['pwrr'] = frame['audio_power'] / frame['last_audio_power']
-  # if zcr delta is high 
-  frame['zcrr'] = frame['last_zcr'] / frame['zcr']
   frame['zcrrr'] = last_frame['zcrr'] / (frame['zcrr'] + 0.0001)
-  #if frame['rms'] < 10: 
-  #  print(' RMS! ',frame['frame'],frame['rms'],frame['audio_level'],frame['audio_mean'])
-
-  # cheap, efficient energy detector. Anything over 0.01 is suspect, but not confirmed
-  # the first occurence of this matters
-
-  #mags1 = np.fft.rfft(frame['last_audio'])
-  mags2 = np.fft.rfft(frame['audio_np'])
-  mags = np.abs(mags2)
-  amax = max(mags)
-  amin = min(mags)
-  variance = np.var(mags)
-  frame['abd'] = (amax + amin) / variance
 
   audio_score = 1 
   audio_flag = ' '
 
   up_thresh = abs(frame['last_audio_mean']) - (abs(frame['last_audio_level']) / 2)
   std_mult = ((frame['last_audio_mean'] - frame['audio_mean']) / (frame['last_audio_level'] / 2))
-  if std_mult > 2:
-    print('std',std_mult,frame['last_audio_mean'],frame['audio_mean'],frame['last_audio_level']/2)
-    #std_mult = 2
 
-  # TODO:
-  # there's a relationship between the labd and this 0.1
-  #  the lower the labd, the higher the 0.1 should be
-  #  
-  # i calibrated against a mean of 500, with an adb of 0.001
-  tmp1 = frame['last_audio_mean'] / 500
-  #tmp2 = 0.001 / frame['last_abd']
-  labd_ratio = 0.03 * tmp1
-  #print('last_mean',frame['last_audio_mean'],labd_ratio)
-  #print('tmp',tmp,frame['last_abd'],labd_ratio)
+  labd_ratio = 0.03 * frame['last_audio_mean'] / 500
   last_mult = up_thresh * labd_ratio * std_mult
 
   frame['abd_thresh'] = last_frame['abd_thresh']
-  # TODO: decay should be influenced by last average abd as well 
   frame['abd_thresh'] *= 0.995
+
+  frame['ster_thresh'] = last_frame['ster_thresh']
+  frame['ster_thresh'] *= 0.995
 
   # theory: if we detect an anomaly but dont hit, that old anomaly level
   # becomes our new floor until the next scene break
-  if (frame['abd'] > (last_frame['abd_thresh'] * 0.9) and frame['abd'] > 3 * (frame['last_abd'] / frame['magic'])):
-    frame['abd_thresh'] = frame['abd']
+
+  # TODO: check the ster component too
+  #if (frame['abd'] > (last_frame['abd_thresh'] * 0.9 and frame['ster'] > last_frame['ster_thresh'] * 0.9) and frame['abd'] > 3 * (frame['last_abd'] / frame['magic'])):
+  if (frame['abd'] > last_frame['abd_thresh'] * 0.9 and frame['ster'] > last_frame['ster_thresh'] * 0.9):
+    #frame['abd_thresh'] = frame['abd']
+    #frame['ster_thresh'] = frame['ster']
     audio_flag = 'm%d' % last_mult
     #print('.. ',frame['frame'],last_mult)
     last_audio = np.fromstring(last_frame['audio'] + frame['audio'],np.int16)
@@ -489,6 +450,7 @@ def audio_shot_detector(frame,last_frame):
   elif frame['zeros'] > len(frame['audio_np']) * 0.9:
     frame['audio_type'] = 'NULL'
     frame['audio_detect'] = frame['frame']
+# magic settings
   elif std_mult > 2 and frame['magic'] >= 3:
     frame['audio_type'] = 'MAGIC1'
     frame['audio_detect'] = frame['frame']
@@ -498,23 +460,21 @@ def audio_shot_detector(frame,last_frame):
   elif frame['zcrrr'] > 100 and frame['magic'] >= 3:
     frame['audio_type'] = 'MAGIC3'
     frame['audio_detect'] = frame['frame']
+  elif frame['sterr'] > 1000 and frame['magic'] >= 2:
+    frame['audio_type'] = 'MAGIC4'
+    frame['audio_detect'] = frame['frame']
+  elif frame['magic'] > 3 and std_mult > 1:
+    audio_flag = 'M'
 
-
-#         data['last_audio'] = play_audio
-#        data['last_audio_level'] = np.std(data['last_audio'])
-#         data['last_audio_power'] = np.sum(data['last_audio']) / self.sample
-#         data['last_rms'] = np.sqrt(np.mean(data['last_audio']**2))
-#         data['last_audio_max'] = data['last_audio'].max(axis=0)
-#         data['last_audio_mean'] = data['last_audio'].mean(axis=0)
-
-   
   # new detectors 
   if frame['audio_detect'] == frame['frame']:
     audio_flag = 'a%d' % last_mult
+  elif audio_flag is ' ' and frame['abd'] > frame['last_abd'] * 5 and (frame['ster'] > frame['mean_ste'] * 10 or frame['ster'] < frame['mean_ste'] * 0.1):
+    audio_flag = 'S%d' % last_mult
   elif (frame['shot_detect'] == frame['frame']) and frame['magic'] > 1: 
     audio_flag = 'M%d' % last_mult
-  elif audio_flag is ' ' and frame['abd'] > frame['last_abd'] * 5:
-    audio_flag = 'D'
+  #elif audio_flag is ' ' and frame['abd'] > frame['last_abd'] * 10:
+  #  audio_flag = 'D'
   #elif audio_flag is ' ' and frame['frame'] > 1250 and frame['frame'] < 1260:
   #  audio_flag = 'P'
   #elif audio_flag is ' ' and frame['frame'] > 2600 and frame['frame'] < 2615:
@@ -522,9 +482,11 @@ def audio_shot_detector(frame,last_frame):
 
 
   if audio_flag is not ' ':
-      #print(frame['frame'],': %.2f' % std_mult,'\t%s ' % audio_flag,frame['audio_type'],' score: ',audio_score,' abd: %.3f labd: %.3f trig: %.3f zcr %.2f zcrr %.2f zcrrr %.2f ster: %.2f '  % (frame['abd'],frame['last_abd'],frame['zcr'],frame['zcrr'],frame['zcrrr'],frame['ster']),' amax: %4d lmax: %4d ' % (frame['audio_max'], frame['last_audio_max']),' amean: %2d%%' % (100 * abs(frame['audio_mean']) / frame['last_audio_mean']),'shot: %s' % frame['shot_type'],'\tzeros: %4d' % frame['zeros'],' astd: %4d' % frame['audio_level'],' lstd: %d' % frame['last_audio_level'],' speech: %2d%%' % (frame['speech_level'] * 100),' arms: %2.1f' % frame['rms'],' lrms %2.1f' % frame['last_rms'], '  pwrr: %2.3f' % abs(frame['pwrr']))
-      print(frame['frame'],': %.2f' % std_mult,'\t%s\t' % audio_flag,frame['audio_type'],'\tscore: ',audio_score,' abd: %.3f labd: %.3f trig: %.3f : zcr %.2f zcrr %.2f zcrrr %.2f ster: %.2f '  % (frame['abd'],frame['last_abd'],frame['abd_thresh'],frame['zcr'],frame['zcrr'],frame['zcrrr'],frame['ster']))
+      print(frame['frame'],': %.2f' % std_mult,'\t%s\t' % audio_flag,frame['audio_type'],'\tscore: ',audio_score,' abd: %.3f : zcr %.2f : ster: %.3f'  % (frame['abd'] / frame['abd_thresh'],frame['zcr'],frame['ster'] / frame['ster_thresh']))
  
+  if (frame['abd'] > last_frame['abd_thresh'] * 0.9 and frame['ster'] > last_frame['ster_thresh'] * 0.9):
+    frame['abd_thresh'] = frame['abd']
+    frame['ster_thresh'] = frame['ster']
 
   return frame
 
