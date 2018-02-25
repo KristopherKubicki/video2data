@@ -26,9 +26,10 @@ def shot_recap(prev_shot):
   #  if 'sign' in frame['summary']:
   #    adj = 'Information '
 
-  print('\t[%s] Title: Unnamed %sShot %d' % (shottime,adj,prev_shot['start']))
-  print('\t[%s] Length: %.02fs, %d frames, %d end' % (shottime,prev_shot['length'],prev_shot['end'] - prev_shot['start'],prev_shot['end']))
-  print('\t[%s] Detect Method: %s ' % (shottime,prev_shot['break_type']))
+  if adj:
+    print('\t[%s] Title: Unnamed %sShot %d' % (shottime,adj,prev_shot['start']))
+    print('\t[%s] Length: %.02fs, %d frames (%s) %d' % (shottime,prev_shot['length'],prev_shot['end'] - prev_shot['start'],prev_shot['break_type'],prev_shot['end']))
+  #print('\t[%s] Detect Method: %s ' % (shottime,prev_shot['break_type']))
   #print('\t[%s] Signature: %s' % (shottime,v2dsig.phash_bits(prev_shot['audioprint'])))
   if prev_shot['summary']:
     print('\t[%s] Description: %s' % (shottime,titlecase.titlecase(prev_shot['summary'])))
@@ -41,22 +42,25 @@ def shot_recap(prev_shot):
  #   print('\t[%s] Faces: %s' % (shottime,set(shot_faces)))
  # if text_rects:
  #   print('\t[%s] Words: %s' % (shottime,len(text_hulls)))
-  print('\t[%s] Voice: %.1f%%' % (shottime,100*prev_shot['voiceprint'].count('1') / len(prev_shot['voiceprint'])))
+ # print('\t[%s] Voice: %.1f%%' % (shottime,100*prev_shot['voiceprint'].count('1') / len(prev_shot['voiceprint'])))
 
 
 def scene_recap(prev_scene):
-  scenetime = prev_scene['scenetime']
+  scenetime = prev_scene.get('scenetime')
   if prev_scene['end'] == prev_scene['start']:
     return
 
   if prev_scene['title'] is not '':
-    print('[%s] Title: %s' % (prev_scene['scenetime'],prev_scene.get('title')))
+    print('[%s] Commercial: %s' % (prev_scene['scenetime'],prev_scene.get('title')))
+  elif prev_scene['com_detect'] is not None:
+    print('[%s] %s: New' % (prev_scene['scenetime'],prev_scene.get('com_detect')))
   else:
-    print('[%s] Title: Unnamed %s' % (prev_scene['scenetime'],prev_scene.get('com_detect')))
+    print('[%s] Unknown Segment' % (prev_scene['scenetime']))
+
   print('[%s] Length: %.02fs, %d frames' % (scenetime,prev_scene['length'],prev_scene['end'] - prev_scene['start']))
-  print('[%s] Detect Method: %s ' % (scenetime,prev_scene['break_type']))  
-  print('[%s] Signature: %s' % (scenetime,v2dsig.phash_bits(prev_scene['shotprint'])))
-  print('[%s] CR %.1f%%' % (scenetime,100*prev_scene['shotprint'].count('1') / len(prev_scene['shotprint'])))
+  #print('[%s] Detect Method: %s ' % (scenetime,prev_scene['break_type']))  
+  #print('[%s] Signature: %s' % (scenetime,v2dsig.phash_bits(prev_scene['shotprint'])))
+  #print('[%s] CR %.1f%%' % (scenetime,100*prev_scene['shotprint'].count('1') / len(prev_scene['shotprint'])))
 
   if prev_scene['summary']:
     print('[%s] Description: %s' % (scenetime,titlecase.titlecase(prev_scene['summary'])))
@@ -72,4 +76,6 @@ def scene_recap(prev_scene):
     print('[%s] Objects: %d' % (scenetime,len(prev_scene['stuff'])))
   if prev_scene['vehicles']:
     print('[%s] Vehicles: %s' % (scenetime,len(prev_scene['vehicles'])))
+  if prev_scene['contrib_rects']:
+    print('[%s] Contrib: %s' % (scenetime,len(prev_scene['contrib_rects'])))
 

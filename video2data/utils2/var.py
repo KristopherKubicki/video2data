@@ -15,12 +15,16 @@ def new_scene(frame_num=0):
   prev_scene['start'] = frame_num
   prev_scene['faces'] = []
   prev_scene['vehicles'] = []
+  prev_scene['contrib_rects'] = []
   prev_scene['people'] = []
   prev_scene['stuff'] = []
   prev_scene['objects'] = []
   prev_scene['break_type'] = ''
   prev_scene['play_audio'] = bytes()
+  prev_scene['com_detect'] = None
   prev_scene['title'] = ''
+  prev_scene['segment'] = 0
+  prev_scene['network_detect'] = 0
   return prev_scene
 
 def new_shot(frame_num=0):

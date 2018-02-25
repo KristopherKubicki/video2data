@@ -14,21 +14,45 @@ def frame_to_contours(frame,last_frame):
   if frame is None or last_frame is None:
     return frame
 
+  # A viewport is like an IFRAME for video
   # line detection with houghlines is too expensive.  we have to do the canny and the hough,
   #  both which we don't really need or want to do
   #  instead, naively check for rows that are the same color
   #  NOTE: this adds a few ms on the grayscale version.  its currently disabled 
-  #tmp = frame['rframe']
-  #tmp = cv2.Canny(tmp,100,1)
-  #lines = cv2.HoughLinesP(tmp,1,np.pi/2,threshold=1,minLineLength=150,maxLineGap=3)
-  # push horizontal bars into array, and detect when those bars transit shots or scenes
-  #if lines is not None and len(lines):
-  #  for x in range(0, len(lines)):
-  #    for x1,y1,x2,y2 in lines[x]:
-  #      if y1 == y2 and x2 - x1 > frame['width'] * 0.5:
-  #        cv2.line(frame['show'],(0,y1),(frame['width'],y1),(0,255,0),2)
-  #      elif x1 == x2 and y2 - y2 > frame['height'] * 0.5:
-  #        cv2.line(frame['show'],(x1,0),(x1,frame['height']),(0,255,0),2)
+  #  NOTE: this seems to work at higher resolutions better than lower, which hurts computation time a lot
+  if frame['frame'] % 60 == 0 or last_frame['shot_detect'] == frame['frame'] - 1:
+    start = time.time()
+    tmp = frame['rframe']
+    # CPU intensive on a big frame
+    tmp = cv2.Canny(tmp,100,1)
+    lines = cv2.HoughLinesP(tmp,1,np.pi/180,threshold=100,minLineLength=frame['height'] * 0.5,maxLineGap=0)
+    tmp_frame = np.zeros((frame['height'],frame['width'],1),np.uint8)
+    # push horizontal bars into array, and detect when those bars transit shots or scenes
+    if lines is not None and len(lines):
+      for x in range(0, len(lines)):
+        for x1,y1,x2,y2 in lines[x]:
+          if y1 == y2 and x2 - x1 >= frame['width'] * 0.6:
+            cv2.line(tmp_frame,(0,y1),(frame['width'],y1),(255),2)
+          elif x1 == x2 and y1 - y2 >= frame['height'] * 0.5:
+            cv2.line(tmp_frame,(x1,0),(x1,frame['height']),(255),2)
+    #cv2.imshow('tmp',tmp_frame)
+    _,cnts,hierarchy = cv2.findContours(cv2.bitwise_not(tmp_frame.copy()), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    # TODO: sort cnts by area before selecting 
+    frame['viewport'] = None
+    for cnt in cnts:
+      x,y,w,h = cv2.boundingRect(cnt)
+      # TODO: check aspect ratio range
+      if w > frame['width'] * 0.5 and h > frame['height'] * 0.5: 
+        frame['viewport'] = cnt
+
+  #  TODO: it's one thing to detect it, but its easier to track it
+  #   consider following the box once it's been spotted
+  else:
+    frame['viewport'] = last_frame['viewport']
+
+  # the viewport is only really useful to us if it is very stable
+  if frame['viewport'] is not None:
+    cv2.polylines(frame['show'],[frame['viewport']],True,(0,255,0),2)
 
   # TODO: detect disolves (contrast delta)
   #  blurs are also a way to get at that
@@ -87,14 +111,10 @@ def frame_to_shots(frame,last_frame):
     frame = video_shot_detector(frame,last_frame)
 
 # run the audio detector again if we believe we have a shot
-  #if frame['shot_detect'] == frame['frame'] and frame.get('audio') and frame.get('audio_type') is None:
-  #  frame = audio_shot_detector(frame,last_frame)
+  if frame['shot_detect'] == frame['frame'] and frame.get('audio') and frame.get('audio_type') is None:
+    frame = audio_shot_detector(frame,last_frame)
 
   frame['break_type'] = '%s%s%d' % (frame['audio_type'],frame['shot_type'],frame['break_count'])
-
-
-  #if 'BLANK' in frame['shot_type']:
-  #  frame['magic'] *= 3 
   frame['sbd'] *= frame['magic']
 
   #
@@ -121,35 +141,16 @@ def frame_to_shots(frame,last_frame):
   elif frame['audio_type'] and frame['shot_detect'] >= frame['audio_detect'] - frame['magic'] - 1:
     #print('WV SCENE',frame['frametime'],frame['frame'],'\t',frame['break_type'])
     frame['scene_detect'] = frame['frame']
+    # FIXME: this is not proper, but we need to signal the shot here or the
+    #  buffer might split it
+    frame['shot_detect'] = frame['frame']
     frame['sbd'] *= 1.2
-  #elif frame['shot_detect'] == frame['frame'] and frame['magic'] > 2 and frame['shot_type'] == 'BLANK':
-  #  print('warning! magic blank shot!',frame['frame'],frame['audio_level'],frame['audio_max'])
-  #  frame['scene_detect'] = frame['frame']
-  #  frame['sbd'] *= 1.0
-
-  # sometimes a scene will cut twice in rapid succession.  Give this an opportunity to trigger but
-  #  not less than 1 second after it already cut
-  #if frame['scene_detect'] == frame['frame'] and last_frame['scene_detect'] + frame['fps'] > frame['frame'] and frame['sbd'] < 1:
-  #  print('warning, dropping double cut! ',frame['frame'],frame['sbd'])
-  #  frame['scene_detect'] = last_frame['scene_detect']
-  #  frame['sbd'] *= 0.1 
-   
-  # if we start getting ROS false positives, this is likely a highly isolated voice over commercial with no other audio
-  #  the silence detector is very sensitive to this kind of audio, and thus the ROS detector has to be turned off if we 
-  #  start getting misses on it.  It reactivates with a scene change, which means one of the other 10 backup mechanisms 
-  #  have to find the break
-  # Keep in mind, the ROS detector is responsible for almost all scene detection otherwise
-  if frame['shot_detect'] != frame['frame'] and frame['audio_detect'] > frame['scene_detect'] + 3*frame['fps'] and frame['audio_detect'] < frame['frame'] - 5 and frame['isolation'] is False:
-    #print(':::::::::::::  setting isolation!!!',frame['frame'])
-    frame['isolation'] = True
 
   # its ok to unset the threshold if we are breaking scenes anyway
   #  we want to pick up candidates
   if frame['scene_detect'] > frame['frame'] - 20:
-    frame['abd_thresh'] = 0
-
-  if frame['scene_detect'] > frame['frame'] - 20 and frame['isolation'] is True:
-    frame['isolation'] = False
+    frame['abd_thresh'] = 0 
+    frame['ster_thresh'] = 0
 
   return frame
 
@@ -276,19 +277,12 @@ def audio_shot_detector(frame,last_frame):
   # becomes our new floor until the next scene break
 
   # TODO: check the ster component too
-  #if (frame['abd'] > (last_frame['abd_thresh'] * 0.9 and frame['ster'] > last_frame['ster_thresh'] * 0.9) and frame['abd'] > 3 * (frame['last_abd'] / frame['magic'])):
   if (frame['abd'] > last_frame['abd_thresh'] * 0.9 and frame['ster'] > last_frame['ster_thresh'] * 0.9):
-    #frame['abd_thresh'] = frame['abd']
-    #frame['ster_thresh'] = frame['ster']
     audio_flag = 'm%d' % last_mult
     #print('.. ',frame['frame'],last_mult)
     last_audio = np.fromstring(last_frame['audio'] + frame['audio'],np.int16)
     last_audio = abs(last_audio)
 
-    # theory: the further the distance, the better likihood this is a break
-    #   set the audio based on how big this distance is
-    #print('\t\tGATE distance: %.3f' % std_mult,frame['abd_thresh'])
-    #print('\t\tSTE GATE OPEN:',frame['frame'],frame['zcrr'],frame['ster'],frame['zcrrr'],frame['sterr'],last_mult,last_mult*0.2)
     for i in range(2):
       if audio_score > 1 or i*900+2048 > len(last_audio):
         break
@@ -463,26 +457,29 @@ def audio_shot_detector(frame,last_frame):
   elif frame['sterr'] > 1000 and frame['magic'] >= 2:
     frame['audio_type'] = 'MAGIC4'
     frame['audio_detect'] = frame['frame']
-  elif frame['magic'] > 3 and std_mult > 1:
-    audio_flag = 'M'
+  elif (frame['shot_detect'] == frame['frame']) and frame['magic'] > 1:
+    print(frame['frame'],': %.2f' % std_mult,'\t%s\t' % audio_flag,frame['audio_type'],'\tscore: ',audio_score,' abd: %.3f labd: %.3f trig: %.3f : zcr %.2f zcrr %.2f zcrrr %.2f ster: %.2f '  % (frame['abd'],frame['last_abd'],frame['abd_thresh'],frame['zcr'],frame['zcrr'],frame['zcrrr'],frame['ster']))
+    #frame['audio_type'] = 'MAGIC5'
+    #frame['audio_detect'] = frame['frame']
+    audio_flag = 'M%d' % last_mult
 
   # new detectors 
-  if frame['audio_detect'] == frame['frame']:
-    audio_flag = 'a%d' % last_mult
-  elif audio_flag is ' ' and frame['abd'] > frame['last_abd'] * 5 and (frame['ster'] > frame['mean_ste'] * 10 or frame['ster'] < frame['mean_ste'] * 0.1):
-    audio_flag = 'S%d' % last_mult
-  elif (frame['shot_detect'] == frame['frame']) and frame['magic'] > 1: 
-    audio_flag = 'M%d' % last_mult
+  #if frame['audio_detect'] == frame['frame']:
+  #  audio_flag = 'a%d' % last_mult
+  #elif audio_flag is ' ' and frame['abd'] > frame['last_abd'] * 5 and (frame['ster'] > frame['mean_ste'] * 10 or frame['ster'] < frame['mean_ste'] * 0.1):
+  #  audio_flag = 'S%d' % last_mult
+  #elif (frame['shot_detect'] == frame['frame']) and frame['magic'] > 1: 
+  #  audio_flag = 'M%d' % last_mult
   #elif audio_flag is ' ' and frame['abd'] > frame['last_abd'] * 10:
   #  audio_flag = 'D'
   #elif audio_flag is ' ' and frame['frame'] > 1250 and frame['frame'] < 1260:
   #  audio_flag = 'P'
   #elif audio_flag is ' ' and frame['frame'] > 2600 and frame['frame'] < 2615:
   #  audio_flag = 'P'
-
-
-  if audio_flag is not ' ':
-      print(frame['frame'],': %.2f' % std_mult,'\t%s\t' % audio_flag,frame['audio_type'],'\tscore: ',audio_score,' abd: %.3f : zcr %.2f : ster: %.3f'  % (frame['abd'] / frame['abd_thresh'],frame['zcr'],frame['ster'] / frame['ster_thresh']))
+  #
+  #if audio_flag is not ' ' or frame['audio_type'] or frame['frame'] in range(590,602):
+  #  print(frame['frame'],': %.2f' % std_mult,'\t%s\t' % audio_flag,frame['audio_type'],'\tscore: ',audio_score,' abd: %.3f : zcr %.2f : ster: %.3f'  % (frame['abd'] / frame['abd_thresh'],frame['zcr'],frame['ster'] / frame['ster_thresh']))
+  #  print(frame['frame'],': %.2f' % std_mult,'\t%s\t' % audio_flag,frame['audio_type'],'\tscore: ',audio_score,' abd: %.3f labd: %.3f trig: %.3f : zcr %.2f zcrr %.2f zcrrr %.2f ster: %.2f '  % (frame['abd'],frame['last_abd'],frame['abd_thresh'],frame['zcr'],frame['zcrr'],frame['zcrrr'],frame['ster']))
  
   if (frame['abd'] > last_frame['abd_thresh'] * 0.9 and frame['ster'] > last_frame['ster_thresh'] * 0.9):
     frame['abd_thresh'] = frame['abd']

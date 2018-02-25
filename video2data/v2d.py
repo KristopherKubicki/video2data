@@ -6,6 +6,8 @@
 FPS = 30
 WIDTH = 1920
 HEIGHT = 1080
+#WIDTH = 1280
+#HEIGHT = 720
 WIDTH = 800
 HEIGHT = 450
 SAMPLE = 44100
@@ -13,8 +15,6 @@ SCALER = 0.2
 
 import os, sys, math
 import tensorflow as tf
-
-import matplotlib.pyplot as plt
 
 from utils2 import image as v2dimage
 from utils2 import sig as v2dsig
@@ -26,8 +26,13 @@ import streams.read
 # Load up the sources 
 sources = [line.rstrip('\n') for line in open('sources.txt')]
 
-import queue
-import threading
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("source", help="path to your media file")
+args = parser.parse_args()
+if args.source:
+  sources = [args.source]
+
 
 # 3.4.0
 import cv2
@@ -47,7 +52,7 @@ im2txt = None
 #im2txt = models.im2txt.nnIm2txt().load()
 #im2txt.test(image_np)
 
-import models.text
+#import models.text
 text = None
 #text = models.text.nnText().load()
 #text.test(image_np)
@@ -70,17 +75,14 @@ objects = None
 
 import models.contrib.deepad
 logo = None
-#logos = models.contrib.deepad.nnLogo().load()
-#logos.test(image_np_expanded)
+logos = models.contrib.deepad.nnLogo().load()
+logos.test(image_np_expanded)
 
 
 # and playing with fifo buffers
 import os, sys, math
 
 import datetime
-
-# facial detection
-import dlib
 
 # A few subprocesses open pipes into the 
 import subprocess
@@ -101,17 +103,15 @@ pygame.init()
 # translators all want mono anyway.  We can always add additional channels
 pygame.mixer.init(SAMPLE, -16, 1)
 
-
 # initialize the tracker
 people_tracker = cv2.MultiTracker_create()
 oi_tracker = cv2.MultiTracker_create()
-logo_tracker = cv2.MultiTracker_create()
 face_tracker = cv2.MultiTracker_create()
 kitti_tracker = cv2.MultiTracker_create()
 
 import streams.cast
 cvs = None
-#cvs = streams.cast.CastVideoStream().load(WIDTH,HEIGHT)
+cvs = streams.cast.CastVideoStream().load(WIDTH,HEIGHT)
 
 
 all_stuff = []
@@ -162,7 +162,6 @@ if 1==1:
         last_caption = ''
 
         scene_count = 0
-        logo_detect_count = 0
         scene_detect = 0
         audio_detect = 0
         motion_start = 0
@@ -178,7 +177,6 @@ if 1==1:
         tmp_pipes = []
         audfprint_queues = []
 
-        logo_rects = []
         oi_rects = []
         kitti_rects = []
         ssd_rects = []
@@ -187,7 +185,6 @@ if 1==1:
         motion_hulls = []
         motion_cnts = []
 
-        logo_frame = 0
         oi_frame = 0
         ssd_frame = 0
         kitti_frame = 0
@@ -200,6 +197,7 @@ if 1==1:
             if fvs.t and fvs.t.is_alive() is False:
               print('done')
               break
+            #print("READ<",time.time())
             time.sleep(0.1)
             continue
 
@@ -216,17 +214,23 @@ if 1==1:
               sound1 = pygame.mixer.Sound(play_audio)
               channel1.queue(sound1)
             prev_scene['play_audio'] += data['play_audio']
+            prev_scene['segment'] += 1
+         
 
 #  TODO: Move this to contrib deepad
 # Audio fingerprinting
 #  drop the wav file down to the ramdrive, background audfprint 
+#
+# NOTE: This is pretty cpu intensive to run.  Its in a background thread, but it's 
+#  recomputing many values on the fly that should be cached.  Probably 1/3 of all 
+#  operation
 #         
             if len(audfprint_queues) > 0:
               for q in audfprint_queues:
                 if q.poll() is not None:
                   tmp = parse_audfprint(q.stdout.read())
                   if tmp.get('name'):
-                    print('\t\tDetected Stored Clip: ',tmp.get('name'))
+                    #print('\t\tDetected Stored Clip: ',tmp.get('name'))
                     # TODO: detect where in the clip we are, and determine where the end of this clip
                     #  will be 
                     prev_scene['title'] = tmp.get('name')
@@ -235,7 +239,9 @@ if 1==1:
                   break
 
 # TODO: only run this if we don't already know the scene
-            if len(prev_scene['play_audio']) > fvs.sample*6 and len(audfprint_queues) < 4 and prev_scene['title'] is '':
+# TODO: cap this on segments -- don't try to recognize programming
+            if prev_scene['segment'] >= 5 and prev_scene['segment'] <= 30 and prev_scene['segment'] % 5 == 0 and len(audfprint_queues) < 2 and prev_scene['title'] is '':
+              # FIXME: race condition on out.wav
               ww = wave.open('/dev/shm/out.wav','wb')
               # one channel
               ww.setnchannels(1)
@@ -245,7 +251,6 @@ if 1==1:
               #  any more would be kind of a waste.  10 sec even seems like a lot
               ww.writeframes(prev_scene['play_audio'][-fvs.sample*2*5:])
               ww.close()
-              # FIXME: race condition on out.wav
               p = subprocess.Popen(['/home/kristopher/audfprint/audfprint.py','match','--dbase','/home/kristopher/audfprint/fpdbase.pklz','/dev/shm/out.wav'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
               audfprint_queues.append(p)
                 
@@ -268,14 +273,8 @@ if 1==1:
             if tmp_caption is '':
               tmp_caption = data['caption']
             frame_caption = data['caption']
-            #print('\t\t[%s] CC: %s' % (data['caption_time'],tmp_caption))
-          
+            print('\t\t[%s] CC: %s' % (data['caption_time'],tmp_caption))
 
-# TODO:
-#  move to DA contrib 
-#          prev_scene['com_detect'] = 'Segment'
-#          if last_frame and last_frame.get('com_detect') and last_frame.get('shot_detect') != last_frame.get('frame'):
-#            data['com_detect'] = last_frame['com_detect']
 
           if last_frame and last_frame['text_hulls']:
             data['text_hulls'] = last_frame['text_hulls']
@@ -306,31 +305,60 @@ if 1==1:
 
 #  SCENE BREAK DETECTOR
 # 
+          if prev_scene['network_detect'] > 10:
+            prev_scene['com_detect'] = 'Programming'
+            prev_scene['title'] = 'Regular Programming'
+          if prev_scene['length'] > 300:
+            prev_scene['com_detect'] = 'Programming'
+            prev_scene['title'] = 'Regular Programming'
+
+          prev_scene['end'] = frame-1
+          prev_scene['scenetime'] = datetime.datetime.utcnow().utcfromtimestamp((prev_scene['start']) / FPS).strftime('%H:%M:%S,%f')[:-3]
           if data.get('scene_detect') == frame and last_frame is not None:
             audfprint_queues = []
             data['scene_detect'] = frame
             if prev_scene['closing'] is None:
               prev_scene['closing'] = last_frame['small']
-            prev_scene['end'] = frame-1
-            prev_scene['break_type'] = prev_shot['break_type']
-            prev_scene['scenetime'] = datetime.datetime.utcnow().utcfromtimestamp((prev_scene['start']) / FPS).strftime('%H:%M:%S,%f')[:-3]
+            prev_scene['sbd'] = data['sbd']
             prev_scene['length'] = float((prev_scene['end'] - prev_scene['start']) / FPS)
+            prev_scene['break_type'] = prev_shot['break_type']
             prev_scene['last_frame'] = prev_shot.get('last_frame')
             prev_scene['closing'] = prev_shot['closing']
 
-            # TODO move to DA contrib
-#            if data['com_detect'] != 'Programming' and int(prev_scene['length']) in [10,15,30,45,60]:
-#              data['com_detect'] = 'Commercial'
-#            prev_scene['type'] = data['com_detect']
+# TODO: move to DA contrib
+            if prev_scene['length'] < 2:
+              prev_scene['com_detect'] = 'Blank'
+              prev_scene['title'] = 'Dead Air'
+
+            cr = 100*prev_scene['shotprint'].count('1') / len(prev_scene['shotprint'])
+            if int(round(prev_scene['length'])) in [5,10,15] and prev_scene['com_detect'] is 'Programming':
+              prev_scene['com_detect'] = 'Network Promo'
+              prev_scene['title'] = 'Network Promo'
+            if cr >= 0.9 and int(round(prev_scene['length'])) in [10,15,30,45,60]:
+              prev_scene['com_detect'] = 'Commercial'
+            elif prev_prev_scene['com_detect'] == 'Commercial' and int(round(prev_scene['length'])) in [15,30,45,60]:
+              prev_scene['com_detect'] = 'Commercial'
+            if prev_scene['length'] > 90 and int(round(prev_scene['length'])) % 15 != 0:
+              prev_scene['com_detect'] = 'Programming'
+         
+            if prev_scene['com_detect'] == 'Commercial' and prev_scene['title'] == '':
+              prev_scene['title'] = 'Unknown Commercial'
+            if prev_scene['com_detect'] == 'Programming' and prev_scene['title'] == '':
+              prev_scene['title'] = 'Regular Programming'
+
+            if prev_scene['title'] == '':
+              prev_scene['title'] = 'Unknown Segment'
+
             log.scene_recap(prev_scene)
 
-            prev_prev_scene = prev_scene
+            if prev_scene['length'] > 2:
+              prev_prev_scene = prev_scene
+
             prev_scene = v2dvar.new_scene(frame)
             prev_shot = v2dvar.new_shot(frame)
 
             caption_end = ''
             frame_caption = ''
-            logo_detect_count = 0
             scene_count += 1
 
 
@@ -388,14 +416,12 @@ if 1==1:
             ssd_rects = []
             oi_rects = []
             kitti_rects = []
-            logo_rects = []
             motion_cnts = []
             motion_hull = []
             data['text_hulls'] = []
             data['text_rects'] = []
             oi_tracker = None
             kitti_tracker = None
-            logo_tracker = None
             face_tracker = None
 
             prev_scene['shotprint'] += '1'
@@ -447,7 +473,7 @@ if 1==1:
                        # consider reading from subprocess here
                        break
                    # don't OCR every frame (unless this is an image)
-                   #print('frame',frame,detected_frame,detected_confidence)
+                   print('frame',frame,detected_frame,detected_confidence)
                    if fvs.image or (detected_confidence == 0 and len(tmp_pipes) < 16):
                      tmp = v2dimage.hullHorizontalImage(data['rframe'],box[0])
                      tstart = time.time()
@@ -491,51 +517,11 @@ if 1==1:
 #  workers, endorsements, and lots of other things.  Ours is trained on 16 classes including 
 #  dental care, alcohol, and network brands.
 #
-          if False and (frame == data.get('shot_detect')+3 or (frame >= motion_start + 10 and frame < motion_start + 10 and frame % 10 == 0) or (frame > subtle_detect and frame < subtle_detect + 30 and frame % 10 == 0) or frame % 601 == 0):
-            #print('\t\tlogo detector')
-            logo_frame = frame
-            start = time.time()
-            image_np_expanded = np.expand_dims(data['rframe'], axis=0)
-            (boxes, scores, classes, num) = logo_sess.run(
-                [da_detection_boxes, da_detection_scores, da_detection_classes, da_num_detections],
-                feed_dict={da_image_tensor: image_np_expanded})
-            logo_rects = []
-            logo_tracker = cv2.MultiTracker_create()
-
-            i = 0
-            for score in scores[0]:
-              if score < 0.2:
-                continue
-              # accept a low score in a corner. but everywhere else it has to be high
-              # check size of rect.  If too big, omit it
-              w = boxes[0][i][2] - boxes[0][i][0]
-              h = boxes[0][i][3] - boxes[0][i][1]
-
-# filter out some stuff 
-              if w*h > 0.5 and score < 0.98:
-                continue
-              if w*h > 0.4 and score < 0.95:
-                continue
-              if w*h > 0.2 and score < 0.5:
-                continue
-              if w > 0.7:
-                continue
-
-              # check to see if the bounding boxes are in the corners, and substantially increase the weight if detected
-              if ((v2dimage.rectInRect(boxes[0][i],(0.8,0.8,1,1)) or v2dimage.rectInRect(boxes[0][i],(0,0.8,0.2,1))) and score > 0.01) or ((v2dimage.rectInRect(boxes[0][i],[0,0,0.2,0.2]) or v2dimage.rectInRect(boxes[0][i],[0.8,0,1,0.2])) and score > 0.1):
-                logo_detect_count += 1
-                if logo_detect_count > FPS:
-                  data['com_detect'] = 'Programming'
-                logo_rects.append([v2dimage.scaleRect(v2dimage.shiftRect(boxes[0][i]),data['width'],data['height']),score,category_index[classes[0][i]]['name'],frame])
-                break
-                  
-              elif score > 0.95:
-                logo_rects.append([v2dimage.scaleRect(v2dimage.shiftRect(boxes[0][i]),data['width'],data['height']),score,category_index[classes[0][i]]['name'],frame])
-                break
-              i += 1
-              if time.time() - start > 0.1:
-                print("warning logo_done",time.time() - start)
-                break
+          if (frame == data.get('shot_detect')+3 or (frame >= motion_start + 10 and frame < motion_start + 10 and frame % 10 == 0) or (frame > subtle_detect and frame < subtle_detect + 30 and frame % 10 == 0) or frame % 601 == 0):
+            # TODO: move the timer inside the model
+            data = logos.run(data,last_frame)
+            if data['com_detect'] == 'Programming':
+              prev_scene['network_detect'] += 1
 
 
 ###############
@@ -779,15 +765,13 @@ if 1==1:
                 if good_rects == 0:
                   face_tracker = None
 
-          #print("output_6",time.time() - start)
-
-
-          if len(logo_rects) > 0:
-            for rect in logo_rects:
+          if data.get('contrib_rects') and len(data['contrib_rects']) > 0:
+            for rect in data['contrib_rects']:
               label = "%s: %d" % (rect[2],int(rect[1]*100))
               text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 1)[0]
               cv2.rectangle(data['show'], (rect[0][0], rect[0][1]+text_size[1]+10), (rect[0][0]+text_size[0]+10, rect[0][1]), (255,0,0), cv2.FILLED)
               cv2.putText(data['show'], label ,(rect[0][0]+5, rect[0][1]+text_size[1]+5),cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+              prev_scene['contrib_rects'].append([rect[2],int(rect[1]*100)])
 
           if len(data['ssd_rects']) > 0:
             for rect in data['ssd_rects']:
@@ -903,8 +887,6 @@ if 1==1:
 ##########
 #  subpocess harvestor 
 # 
-          
- 
           busy_pipes = []
           for pipe in tmp_pipes:
             # 1ms per poll() ...
@@ -973,16 +955,19 @@ if 1==1:
           # never put last_frame in data
           last_frame = data.copy()
 
-          setLabel(data['show'], "FBUF: %d (%dms)" % (fvs.Q.qsize(),waitkey),115)
-          setLabel(data['show'], "FRAM: %d (%.3ffps)" % (data['frame'],fps_frame / (time.time() - start_time)),135)
-          setLabel(data['show'], "VIEW: %s" % data['frametime'],175)
-          setLabel(data['show'], "SBD: %.2f" % data['sbd'],195)
+          #setLabel(data['show'], "FBUF: %d (%dms)" % (fvs.Q.qsize(),waitkey),115)
+          #setLabel(data['show'], "FRAM: %d (%.3ffps)" % (data['frame'],fps_frame / (time.time() - start_time)),135)
+          #setLabel(data['show'], "VIEW: %s" % data['frametime'],175)
+          #setLabel(data['show'], "SBD: %.2f" % data['sbd'],195)
           if data['shot_detect'] > data['frame']:
             setLabel(data['show'], "NEXT: %d" % (int(data['shot_detect']) - int(data['frame'])),215)
           if data['scene_detect'] > data['frame']:
             setLabel(data['show'], "SCENE: %d" % (int(data['shot_detect']) - int(data['frame'])),235)
           if prev_scene['title'] is not '':
-            setLabel(data['show'], "COMM: %s" % (prev_scene['title']),255)
+            setLabel(data['show'], "CURR: %s" % (prev_scene['title']),255)
+          if prev_prev_scene['title'] is not '':
+            setLabel(data['show'], "LAST: %s" % (prev_prev_scene['title']),285)
+# 
 # 
 # 
 # 
@@ -1008,8 +993,6 @@ if 1==1:
             if tmp > 30:
               tmp = 30
             waitkey += int(tmp)
-
-          #cv2.imwrite('/tmp/demo_5/frame.%05d.bmp' % frame,cast_frame)
 
           if fvs.display is False:
             continue
@@ -1051,6 +1034,7 @@ if 1==1:
           elif frame > 1000000:
             fvs.stop()
             break
+      log.scene_recap(prev_scene)
 
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/python3 
 # coding: utf-8
  
-import os, sys
+import os, sys, stat 
 import random
 import threading
 import multiprocessing
@@ -44,6 +44,7 @@ def new_frame(frame_num=0):
   frame['sbd'] = 0.0
   # hulls from motion
   frame['motion_hulls'] = []
+  frame['viewport'] = None
 
   # last shot detected, could be itself
   frame['shot_detect'] = 0
@@ -82,8 +83,11 @@ def new_frame(frame_num=0):
   frame['face_rects'] = []
   frame['vehicle_rects'] = []
   frame['object_rects'] = []
+  frame['contrib_rects'] = []
   frame['text_rects'] = []
   frame['text_hulls'] = []
+
+  frame['com_detect'] = None
 
   return frame
 
@@ -146,12 +150,11 @@ class FileVideoStream:
     if self.caption_fifo is not None:
       os.close(caption_fifo)
 
-    # not thread safe
-    if os.path.exists('/tmp/%s_video' % self.name):
+    if os.path.lexists('/tmp/%s_video' % self.name):
       os.unlink('/tmp/%s_video' % self.name)
-    if os.path.exists('/tmp/%s_audio' % self.name):
+    if os.path.lexists('/tmp/%s_audio' % self.name):
       os.unlink('/tmp/%s_audio' % self.name)
-    if os.path.exists('/tmp/%s_caption' % self.name):
+    if os.path.lexists('/tmp/%s_caption' % self.name):
       os.unlink('/tmp/%s_caption' % self.name)
 
     os.mkfifo('/tmp/%s_video' % self.name)
@@ -176,8 +179,6 @@ class FileVideoStream:
       self.pipe = subprocess.Popen(video_command)
 
       print('Step 2 initializing video /tmp/%s_video' % self.name)
-      if not os.path.exists('/tmp/%s_video' % self.name):
-        return
       self.video_fifo = os.open('/tmp/%s_video' % self.name,os.O_RDONLY | os.O_NONBLOCK,self.width*self.height*3*10)
       # 
       # WARNING: your fifo pipe has to be large enough to hold a bunch of video frames.  By default its only 1MB, which is
@@ -271,7 +272,6 @@ class FileVideoStream:
     #self.tas = TranscribeAudioStream().load()
 
     # initialize the analyzer pipe
-    #self.Q = queue.Queue(maxsize=queueSize)
     self.Q = multiprocessing.Queue(maxsize=queueSize)
 
   def __del__(self):
@@ -291,11 +291,11 @@ class FileVideoStream:
       os.close(self.audio_fifo)
 
     # I need to figure out how to get it to reset the console too
-    if self.video_fifo and os.path.exists('/tmp/%s_video' % self.name):
+    if os.path.lexists('/tmp/%s_video' % self.name):
       os.unlink('/tmp/%s_video' % self.name)
-    if self.audio_fifo and os.path.exists('/tmp/%s_audio' % self.name):
+    if os.path.lexists('/tmp/%s_audio' % self.name):
       os.unlink('/tmp/%s_audio' % self.name)
-    if self.caption_fifo and os.path.exists('/tmp/%s_caption' % self.name):
+    if os.path.lexists('/tmp/%s_caption' % self.name):
       os.unlink('/tmp/%s_caption' % self.name)
 
   def load(self,width,height,fps,sample,scale=0.2):
@@ -435,7 +435,8 @@ class FileVideoStream:
          data['audio_power'] = np.sum(abs(data['audio_np'])) / self.sample
          local_mean = np.mean(data['audio_np']**2)
          # TODO: fix issues with negative sqrts
-         data['rms'] = np.sqrt(local_mean)
+         if data['audio_level'] > 0 and local_mean > 0:
+           data['rms'] = np.sqrt(local_mean)
          data['audio_max'] = abs(data['audio_np']).max(axis=0)
          data['audio_mean'] = abs(data['audio_np']).mean(axis=0)
 
@@ -446,24 +447,24 @@ class FileVideoStream:
          amax = max(mags)
          amin = min(mags)
          variance = np.var(mags)
-         data['abd'] = (amax + amin) / variance
+         data['abd'] = (amax + amin) / (variance + 0.0001)
 
          signs = np.sign(data['audio_np'])
          signs[signs == 0] = -1
-         data['zcr'] = len(np.where(np.diff(signs))[0])/len(data['audio_np']) + 0.0001 
+         data['zcr'] = len(np.where(np.diff(signs))[0])/(len(data['audio_np'] + 0.0001))
 
          signs = np.sign(data['last_audio'])
          signs[signs == 0] = -1
-         data['last_zcr'] = len(np.where(np.diff(signs))[0])/len(data['last_audio']) + 0.0001
+         data['last_zcr'] = len(np.where(np.diff(signs))[0])/(len(data['last_audio'] + 0.0001))
 
-         data['ster'] = data['last_ste'] / data['ste']
+         data['ster'] = data['last_ste'] / (data['ste'] + 0.0001)
 # it might make sense to reset this on scene breaks
          rolling_ste.append(data['ster'])
          if len(rolling_ste) > self.fps * 10:
            rolling_ste.pop(0)
          data['mean_ste'] = np.mean(rolling_ste)
-         data['pwrr'] = data['audio_power'] / data['last_audio_power']
-         data['zcrr'] = data['last_zcr'] / data['zcr']
+         data['pwrr'] = data['audio_power'] / (data['last_audio_power'] + 0.0001)
+         data['zcrr'] = data['last_zcr'] / (data['zcr'] + 0.0001)
 
 
          # calculate longest continous zero chain
@@ -596,8 +597,6 @@ class FileVideoStream:
              scenes = []
              data_buf.append(data)
              for buf in data_buf:
-               # TODO: calculate scene energy and hand it to the next window
-               #  that way we can determine pitch changes
                if last_buf is not None and buf['sbd'] == 0.0:
                  buf = shot.frame_to_contours(buf,last_buf)
                  buf = shot.frame_to_shots(buf,last_buf)
@@ -611,17 +610,14 @@ class FileVideoStream:
              real_break = new_buf[0]['shot_detect']
              # pick the oldest frame in a tie
              if len(scenes) > 0:
-               # TODO: only cut on shots. this is a hack for now
                scenes.sort(key=lambda x: x[0],reverse=True)
                scenes.sort(key=lambda x: x[1],reverse=True)
-               print(data['frame'],'upcoming scenes',scenes)
+               #print(data['frame'],'upcoming scenes',scenes)
+               # TODO: include the cluster in the frame packet for logging
                real_break = scenes[0][0]
                last_scene = real_break
-               print("RESETTING STE COUNTER")
                rolling_ste = []
                play_audio = None
-               data['ster_thresh'] *= 0.1
-               data['abd_thresh'] *= 0.1
              elif len(breaks) > 0:
                breaks.sort(key=lambda x: x[0],reverse=True)
                breaks.sort(key=lambda x: x[1],reverse=True)
@@ -694,7 +690,7 @@ class FileVideoStream:
           # TODO: remove duplicates
           self.caption_guide[last_caption]['caption'] += line + ' '
         # TODO: HACK. this belongs in the logger
-        print('\t\t[%s] CC: ' % last_caption,line)
+        #print('\t\t[%s] CC: ' % last_caption,line)
     if last_caption is not '':
       return last_caption,self.caption_guide[last_caption]['caption']
     return last_caption,''
