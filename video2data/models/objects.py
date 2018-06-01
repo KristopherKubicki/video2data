@@ -5,8 +5,8 @@ NUM_CLASSES = 546
 
 import sys
 import tensorflow as tf
-sys.path.append('/home/kristopher/models/research/object_detection')
-from utils import label_map_util
+#sys.path.append('/home/kristopher/models/research/object_detection')
+from utils2 import label_map_util
 
 
 # Another model that can detect tons of objects. This is currently

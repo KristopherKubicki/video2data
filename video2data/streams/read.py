@@ -185,15 +185,15 @@ class FileVideoStream:
       #  not very much data.  I increased mine to hold 10 frames of 1080 rawvideo
       #
       # sudo sysctl fs.pipe-max-size=6220800
-      fcntl(self.video_fifo,1031,6220800)
+      #fcntl(self.video_fifo,1031,6220800)
       #
       # puny linux default
-      #fcntl(self.video_fifo,1031,1048576)
+      fcntl(self.video_fifo,1031,1048576)
 
       print('Step 3 initializing audio /tmp/%s_audio' % self.name)
       self.audio_fifo = os.open('/tmp/%s_audio' % self.name,os.O_RDONLY | os.O_NONBLOCK,self.sample*2*10)
-      #fcntl(self.audio_fifo,1031,1048576)
-      fcntl(self.audio_fifo,1031,6220800)
+      fcntl(self.audio_fifo,1031,1048576)
+      #fcntl(self.audio_fifo,1031,6220800)
 
       # TODO: move this to os.open()
       self.caption_fifo = os.open('/tmp/%s_caption' % self.name,os.O_RDONLY | os.O_NONBLOCK,4096)

@@ -5,8 +5,8 @@ NUM_CLASSES = 2
 import sys
 import tensorflow as tf
 # TODO: tf_slim instead
-sys.path.append('/home/kristopher/models/research/object_detection')
-from utils import label_map_util
+#sys.path.append('/home/kristopher/models/research/object_detection')
+from utils2 import label_map_util
 
 #
 # A car / pedestrian flavored model, good for exterior cameras

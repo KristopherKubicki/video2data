@@ -26,12 +26,12 @@ import streams.read
 # Load up the sources 
 sources = [line.rstrip('\n') for line in open('sources.txt')]
 
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument("source", help="path to your media file")
-args = parser.parse_args()
-if args.source:
-  sources = [args.source]
+#import argparse
+#parser = argparse.ArgumentParser()
+#parser.add_argument("source", help="path to your media file")
+#args = parser.parse_args()
+#if not sources and args.source:
+#  sources = [args.source]
 
 
 # 3.4.0
@@ -47,8 +47,8 @@ faces = None
 #faces = models.face.nnFace().load()
 #faces.test(image_np)
 
-import models.im2txt
-im2txt = None
+#import models.im2txt
+#im2txt = None
 #im2txt = models.im2txt.nnIm2txt().load()
 #im2txt.test(image_np)
 
@@ -58,9 +58,9 @@ text = None
 #text.test(image_np)
 
 import models.ssd
-ssd = None
-#ssd = models.ssd.nnSSD().load()
-#ssd.test(image_np_expanded)
+#ssd = None
+ssd = models.ssd.nnSSD().load()
+ssd.test(image_np_expanded)
 
 import models.vehicle
 vehicle = None
@@ -75,8 +75,8 @@ objects = None
 
 import models.contrib.deepad
 logo = None
-logos = models.contrib.deepad.nnLogo().load()
-logos.test(image_np_expanded)
+#logos = models.contrib.deepad.nnLogo().load()
+#logos.test(image_np_expanded)
 
 
 # and playing with fifo buffers
@@ -109,9 +109,9 @@ oi_tracker = cv2.MultiTracker_create()
 face_tracker = cv2.MultiTracker_create()
 kitti_tracker = cv2.MultiTracker_create()
 
-import streams.cast
+#import streams.cast
 cvs = None
-cvs = streams.cast.CastVideoStream().load(WIDTH,HEIGHT)
+#cvs = streams.cast.CastVideoStream().load(WIDTH,HEIGHT)
 
 
 all_stuff = []
@@ -498,7 +498,9 @@ if 1==1:
 #  doesn't have to be all the time
 # mobilenet, then dlib if we see people
 #
-          if ssd is not None and ssd.sess is not None and (data.get('shot_detect') and (frame == data.get('shot_detect') + 3 or fvs.image or (frame <= motion_start + 4 and frame % 5 == 0)) or frame % 31 == 0):
+          #if ssd is not None and ssd.sess is not None and (data.get('shot_detect') and (frame == data.get('shot_detect') + 3 or fvs.image or (frame <= motion_start + 4 and frame % 5 == 0)) or frame % 31 == 0):
+          #if ssd is not None and ssd.sess is not None and (frame <= motion_start + 4 and frame % 5 == 0)) or frame % 31 == 0):
+          if ssd is not None and ssd.sess is not None and (data.get('shot_detect') and (frame == data.get('shot_detect') + 3 or fvs.image or (frame <= motion_start + 4 and frame % 5 == 0)) or frame % 7 == 0):
             ssd_frame = frame
 
             #  It doesn't really make sense to run this
@@ -506,6 +508,9 @@ if 1==1:
             people_tracker = cv2.MultiTracker_create()
             kitti_tracker = cv2.MultiTracker_create()
             data = ssd.run(data,last_frame)
+            #for human_rect in data['human_rects']:
+              #print("data:",human_rect);
+              #ok = people_tracker.add(cv2.TrackerKCF_create(),frame['small'],v2dimage.scaleRect(v2dimage.shiftRect(human_rect[0][i]),frame['width']*SCALER,frame['height']*SCALER))
           elif frame != data['shot_detect'] and last_frame:
             data['human_rects'] = last_frame['human_rects']
             data['ssd_rects'] = last_frame['ssd_rects']
@@ -517,11 +522,11 @@ if 1==1:
 #  workers, endorsements, and lots of other things.  Ours is trained on 16 classes including 
 #  dental care, alcohol, and network brands.
 #
-          if (frame == data.get('shot_detect')+3 or (frame >= motion_start + 10 and frame < motion_start + 10 and frame % 10 == 0) or (frame > subtle_detect and frame < subtle_detect + 30 and frame % 10 == 0) or frame % 601 == 0):
-            # TODO: move the timer inside the model
-            data = logos.run(data,last_frame)
-            if data['com_detect'] == 'Programming':
-              prev_scene['network_detect'] += 1
+          #if (frame == data.get('shot_detect')+3 or (frame >= motion_start + 10 and frame < motion_start + 10 and frame % 10 == 0) or (frame > subtle_detect and frame < subtle_detect + 30 and frame % 10 == 0) or frame % 601 == 0):
+          #  # TODO: move the timer inside the model
+          #  data = logos.run(data,last_frame)
+          #  if data['com_detect'] == 'Programming':
+          #    prev_scene['network_detect'] += 1
 
 
 ###############
@@ -633,9 +638,9 @@ if 1==1:
 
             exclude_labels.extend(list(set(all_stuff) - set(include_labels)))
          
-            if im2txt:
-              prev_shot['summary'] = im2txt.run(data['rframe'].copy(),include_labels,exclude_labels)
-              prev_scene['summary'] += prev_shot['summary'] + ' '
+            #if im2txt:
+            #  prev_shot['summary'] = im2txt.run(data['rframe'].copy(),include_labels,exclude_labels)
+            #  prev_scene['summary'] += prev_shot['summary'] + ' '
 
 
 ###########
@@ -832,24 +837,26 @@ if 1==1:
           if len(data['human_rects']) > 0:
             appearances = defaultdict(int)
             for rect in data['human_rects']:
-              if rect[1] < 0.6 and frame < rect[3] + 10:
-                break
-              if rect[1] < 0.5 and frame < rect[3] + 20:
-                break
-              if rect[1] < 0.4 and frame < rect[3] + 40:
-                break
+              if rect[1] < 0.3:
+                 break
+              #if rect[1] < 0.6 and frame < rect[3] + 10:
+              #  break
+              #if rect[1] < 0.5 and frame < rect[3] + 20:
+              #  break
+              #if rect[1] < 0.4 and frame < rect[3] + 40:
+              #  break
 
-              if len(data['human_rects']) > 3 and rect[1] < 0.6:
-                break
-              if len(data['human_rects']) > 2 and rect[1] < 0.5:
-                break
-              if len(data['human_rects']) > 1 and rect[1] < 0.4:
-                break
-              if len(data['human_rects']) > 0 and rect[1] < 0.3:
-                break
+              #if len(data['human_rects']) > 3 and rect[1] < 0.6:
+              #  break
+              #if len(data['human_rects']) > 2 and rect[1] < 0.5:
+              #  break
+              #if len(data['human_rects']) > 1 and rect[1] < 0.4:
+              #  break
+              #if len(data['human_rects']) > 0 and rect[1] < 0.3:
+              #  break
               age = frame-rect[3]
-              #label = "%s %.2f %d" % (rect[2],rect[1],age)
-              label = rect[2]
+              label = "%s %.2f %d" % (rect[2],rect[1],age)
+              #label = rect[2]
               appearances[label] += 1
               # Don't write 2 people with the same label
               if label[:4] == 'CELE' and appearances[label] > 1:
@@ -860,6 +867,7 @@ if 1==1:
                 age = 128
 
               text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 1)[0]
+              cv2.rectangle(data['show'], (rect[0][0], rect[0][1]), (rect[0][2], rect[0][3]), (0,255-age,0), 2)
               cv2.rectangle(data['show'], (rect[0][0], rect[0][1]+text_size[1]+10), (rect[0][0]+text_size[0]+10, rect[0][1]), (0,255-age,0), cv2.FILLED)
               cv2.putText(data['show'], label ,(rect[0][0]+5, rect[0][1]+text_size[1]+5),cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 

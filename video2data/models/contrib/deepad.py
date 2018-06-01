@@ -8,8 +8,8 @@ import tensorflow as tf
 import numpy as np
 from utils2 import image as v2dimage
 
-sys.path.append('/home/kristopher/models/research/object_detection')
-from utils import label_map_util
+#sys.path.append('/home/kristopher/models/research/object_detection')
+from utils2 import label_map_util
 
 # load up the SSD-derived NN I trained on the 16 brand logos
 #   this is used for commercial detection.  Average inference is about 0.03s on 1080p
