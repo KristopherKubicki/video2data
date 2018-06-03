@@ -217,43 +217,6 @@ if 1==1:
             prev_scene['segment'] += 1
          
 
-#  TODO: Move this to contrib deepad
-# Audio fingerprinting
-#  drop the wav file down to the ramdrive, background audfprint 
-#
-# NOTE: This is pretty cpu intensive to run.  Its in a background thread, but it's 
-#  recomputing many values on the fly that should be cached.  Probably 1/3 of all 
-#  operation
-#         
-            if len(audfprint_queues) > 0:
-              for q in audfprint_queues:
-                if q.poll() is not None:
-                  tmp = parse_audfprint(q.stdout.read())
-                  if tmp.get('name'):
-                    #print('\t\tDetected Stored Clip: ',tmp.get('name'))
-                    # TODO: detect where in the clip we are, and determine where the end of this clip
-                    #  will be 
-                    prev_scene['title'] = tmp.get('name')
-                  audfprint_queues.pop(0)
-                else:
-                  break
-
-# TODO: only run this if we don't already know the scene
-# TODO: cap this on segments -- don't try to recognize programming
-            if prev_scene['segment'] >= 5 and prev_scene['segment'] <= 30 and prev_scene['segment'] % 5 == 0 and len(audfprint_queues) < 2 and prev_scene['title'] is '':
-              # FIXME: race condition on out.wav
-              ww = wave.open('/dev/shm/out.wav','wb')
-              # one channel
-              ww.setnchannels(1)
-              ww.setframerate(fvs.sample)
-              ww.setsampwidth(2)
-              # only send the last 10 seconds of audio back in
-              #  any more would be kind of a waste.  10 sec even seems like a lot
-              ww.writeframes(prev_scene['play_audio'][-fvs.sample*2*5:])
-              ww.close()
-              p = subprocess.Popen(['/home/kristopher/audfprint/audfprint.py','match','--dbase','/home/kristopher/audfprint/fpdbase.pklz','/dev/shm/out.wav'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-              audfprint_queues.append(p)
-                
           start = time.time()
           waitkey = realtime.smoothWait(fvs)
           fvs.ff = False
