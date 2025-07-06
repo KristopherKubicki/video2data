@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "video2data"))
 sys.modules.setdefault("cv2", types.ModuleType("cv2"))
 np_stub = types.SimpleNamespace(sum=sum)
 sys.modules.setdefault("numpy", np_stub)
-from utils2 import image
+from utils2 import image  # noqa: E402
 
 
 def test_chi2_distance_zero():
@@ -22,4 +22,3 @@ def test_chi2_distance_symmetry():
     val1 = image.chi2_distance(hist_a, hist_b)
     val2 = image.chi2_distance(hist_b, hist_a)
     assert abs(val1 - val2) < 1e-6
-
