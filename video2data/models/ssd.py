@@ -3,12 +3,13 @@
 
 NUM_CLASSES = 90
 
+import os
 import sys
 import tensorflow as tf
 import numpy as np
 from utils2 import image as v2dimage
 
-sys.path.append('/home/kristopher/models/research/object_detection')
+sys.path.append(os.path.expanduser('~/models/research/object_detection'))
 from utils import label_map_util
 
 class nnSSD:

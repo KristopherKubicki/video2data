@@ -1,13 +1,14 @@
 #!/usr/bin/python3
 # coding: utf-8
 
+import os
 import sys
 
 #load up the im2txt captioner.  This is used to describe shots
 #  mine is trained against mscoco.  This will be a rapidly advancing area
 #
 # consider just importing this whole thing 
-sys.path.append('/home/kristopher/models/research/im2txt')
+sys.path.append(os.path.expanduser('~/models/research/im2txt'))
 from im2txt import configuration
 from im2txt import inference_wrapper
 from im2txt.inference_utils import caption_generator

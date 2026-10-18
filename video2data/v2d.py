@@ -251,7 +251,7 @@ if 1==1:
               #  any more would be kind of a waste.  10 sec even seems like a lot
               ww.writeframes(prev_scene['play_audio'][-fvs.sample*2*5:])
               ww.close()
-              p = subprocess.Popen(['/home/kristopher/audfprint/audfprint.py','match','--dbase','/home/kristopher/audfprint/fpdbase.pklz','/dev/shm/out.wav'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+              p = subprocess.Popen([os.path.expanduser('~/audfprint/audfprint.py'),'match','--dbase',os.path.expanduser('~/audfprint/fpdbase.pklz'),'/dev/shm/out.wav'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
               audfprint_queues.append(p)
                 
           start = time.time()

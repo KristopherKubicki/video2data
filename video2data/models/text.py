@@ -1,10 +1,11 @@
 #!/usr/bin/python3
 # coding: utf-8
 
+import os
 import sys
 import tensorflow as tf
 # required to symlink the nets/ path
-sys.path.append('/home/kristopher/EAST')
+sys.path.append(os.path.expanduser('~/EAST'))
 import model as east
 import numpy as np
 import cv2

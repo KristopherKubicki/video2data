@@ -2,10 +2,11 @@
 # coding: utf-8
 NUM_CLASSES = 2
 
+import os
 import sys
 import tensorflow as tf
 # TODO: tf_slim instead
-sys.path.append('/home/kristopher/models/research/object_detection')
+sys.path.append(os.path.expanduser('~/models/research/object_detection'))
 from utils import label_map_util
 
 #
