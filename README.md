@@ -134,3 +134,11 @@ Special thanks to all the people who inspired and helped me build this applicati
   <li><a href='https://www.youtube.com/channel/UCWN3xxRkmTPmbKwht9FuE5A'>Siraj Raval</a></li>
  </ul>
 
+
+### Local dependency paths
+
+External model repositories are resolved under the current user's home directory
+(`~/models/research`, `~/EAST`, and `~/audfprint`). Install those dependencies
+there or adapt the paths for your environment. The archived caption-training graph
+uses relative `data/mscoco/` shard paths; generating a new training graph is
+recommended for a different dataset layout.
